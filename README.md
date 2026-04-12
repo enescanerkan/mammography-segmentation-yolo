@@ -15,14 +15,6 @@ Upon executing inference, the geometric analysis pipeline mathematically derives
 
 ---
 
-## Architectural Principles (SOLID / OOP)
-
-The codebase leverages strict **Object-Oriented Programming** principles to enable simple maintainability and independent testing:
-- `SegmentationModel` (Single Responsibility Principle) - Dedicated exclusively to generating inference bounds against input variables.
-- `MLOAnalyzer` - Receives agnostic output geometries from the segmentation layer and translates them into physical pixel distances. 
-- `ResultVisualizer` - Completely detached drawing classes allowing headless pipeline usage without rendering overhead.
-
----
 
 ## Example Outputs
 

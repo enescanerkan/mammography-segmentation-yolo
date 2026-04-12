@@ -17,13 +17,16 @@ predictions/
 venv/
 .env
 
-# Datasets and Media
+# Datasets and Media (exclude raw data, allow example output images)
 images/
 labels/
 test/
 *.png
 *.jpg
 *.npy
+# Allow example output images for README
+!example_mlo.png
+!example_cc.png
 
 # IDE 
 .vscode/

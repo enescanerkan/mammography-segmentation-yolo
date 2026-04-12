@@ -26,13 +26,16 @@ The codebase leverages strict **Object-Oriented Programming** principles to enab
 
 ## Example Outputs
 
-### MLO View (Pectoral Line + PNL)
-*Screenshot placeholder for MLO predictions*  
-![MLO Example](mlo_example.png)
-
-### CC View (Tissue Depth)
-*Screenshot placeholder for CC predictions*  
-![CC Example](cc_example.png)
+<table>
+  <tr>
+    <th>MLO View — Pectoral Line + PNL</th>
+    <th>CC View — Tissue Depth</th>
+  </tr>
+  <tr>
+    <td><img src="example_mlo.png" alt="MLO Example" width="420"/></td>
+    <td><img src="example_cc.png" alt="CC Example" width="420"/></td>
+  </tr>
+</table>
 
 ---
 

@@ -1,0 +1,34 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# PyTorch & YOLO Models
+*.pt
+*.pth
+weights/
+
+# Execution Tracking
+runs/
+analysis_output/
+predictions/
+
+# Virtual Environments
+venv/
+.env
+
+# Datasets and Media
+images/
+labels/
+test/
+*.png
+*.jpg
+*.npy
+
+# IDE 
+.vscode/
+.idea/
+
+# Local workspace configs
+data.yaml
+config_local*.py

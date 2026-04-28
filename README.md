@@ -4,7 +4,7 @@ This project trains a **YOLO segmentation** model for mammography (pectoral musc
 
 ## Example visualization (DICOM grid)
 
-The figure below shows one study (MLO row, CC row): **GT**, **rule-based pose**, and **segmentation** with PNL / depth overlays and whether the sample passes the **10 mm** rule.
+The figure below shows one study *(example: `0f8c73f15309c38d4867102295eb068c`, right breast)* — **MLO** top row, **CC** bottom row: **GT**, **rule-based pose**, and **segmentation** with PNL / depth overlays and whether the sample passes the **10 mm** rule.
 
 ![DICOM comparison: ground truth vs rule-based pose vs segmentation](docs/images/viz_dicom_comparison_example.png)
 

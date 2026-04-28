@@ -1,37 +1,46 @@
-# Byte-compiled / optimized / DLL files
+# Python
 __pycache__/
 *.py[cod]
 *$py.class
-
-# PyTorch & YOLO Models
-*.pt
-*.pth
-weights/
-
-# Execution Tracking
-runs/
-analysis_output/
-predictions/
-
-# Virtual Environments
+*.egg-info/
+*.egg
+dist/
+build/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
 venv/
 .env
+.env.*
 
-# Datasets and Media (exclude raw data, allow example output images)
-images/
-labels/
-test/
-*.png
-*.jpg
-*.npy
-# Allow example output images for README
-!example_mlo.png
-!example_cc.png
+# Veri setleri ve ham DICOM (boyut)
+compare-dataset/
+seg-dataset/
 
-# IDE 
+# Karşılaştırma / inference çıktıları
+compare_output/
+predictions/
+analysis_output/
+
+# Eğitim koşuları (runs/weights, cache, grafikler)
+runs/
+
+# Poz ağırlıkları (*.pt paylaşılmaz; README dokümantasyon olarak commit edilebilir)
+pose_weights/*.pt
+pose_weights/*.onnx
+pose_weights/**/*.pt
+
+# Kök dizine indirilen Ultralytics hub checkpoint’leri (ör. yolo26l-pose.pt)
+/*.pt
+
+# IDE
 .vscode/
 .idea/
+*.swp
+*~
 
-# Local workspace configs
-data.yaml
-config_local*.py
+# OS
+Thumbs.db
+Desktop.ini
+.DS_Store

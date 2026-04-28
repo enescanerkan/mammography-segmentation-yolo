@@ -1,6 +1,4 @@
-"""
- Mammography segmentation + karşılaştırma hattı — SOLID OOP orchestrator girişi.
-"""
+"""Mammography segmentation and comparison pipeline — CLI entry (SOLID-oriented)."""
 import argparse
 import sys
 from pathlib import Path
@@ -33,7 +31,7 @@ def main():
     elif args.mode == "train":
         train_main()
     else:
-        print(f"Bilinmeyen mod: {args.mode}", file=sys.stderr)
+        print(f"Unknown mode: {args.mode}", file=sys.stderr)
         sys.exit(1)
 
 

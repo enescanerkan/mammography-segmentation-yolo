@@ -1,96 +1,117 @@
-# Mammography Segmentation & Positioning — YOLO Pipeline
+# Mammography segmentation & clinical metrics (YOLO)
 
-YOLO segmentasyon ve YOLO pose (rule-based) modellerini kullanarak mamografi görüntülerinde **PNL** (Posterior Nipple Line) ve **CC Depth** mesafelerini hesaplar, **10mm kuralına** göre karşılaştırır ve klinik metrikler üretir.
+This project trains a **YOLO segmentation** model for mammography (pectoral muscle, breast tissue, nipple) and runs a **comparison pipeline** that scores **ground truth**, **rule-based YOLO pose**, and **segmentation-derived** geometry. It computes **Posterior Nipple Line (PNL)** on **MLO** views and **chest-wall depth** on **CC** views, then evaluates the **10 mm clinical rule** (|PNL − Depth|).
 
-## Proje Yapısı
+## Example visualization (DICOM grid)
+
+The figure below shows one study (MLO row, CC row): **GT**, **rule-based pose**, and **segmentation** with PNL / depth overlays and whether the sample passes the **10 mm** rule.
+
+![DICOM comparison: ground truth vs rule-based pose vs segmentation](docs/images/viz_dicom_comparison_example.png)
+
+## Architecture (SOLID-oriented)
+
+| Principle | How it is reflected |
+|-----------|---------------------|
+| **SRP** | `PipelineOrchestrator` wires the run only; `InferenceEngine` runs models; `MammographyDataset` loads CSVs and pairs; `MetricsCalculator` builds tables; `ResultVisualizer` draws outputs. |
+| **OCP** | New pose/seg backends can subclass `BaseModel` or swap implementations via `ModelFactory` without rewriting the orchestrator. |
+| **DIP** | `pipeline/interfaces.py` documents expected capabilities (`Protocol`s) so higher-level modules depend on behaviors, not concrete classes. |
+
+## Repository layout
 
 ```
 mammography-segmentation-yolo/
-├── start.py                  # Ana giriş noktası (CLI)
-├── run_train.py              # YOLO segmentasyon eğitimi
-├── build_dataset.py          # Veri seti birleştirme
-├── setup_dataset.py          # Train/val/test split
+├── start.py                  # CLI entry (compare | train)
+├── run_train.py              # Segmentation training wrapper
+├── build_dataset.py          # Build seg-dataset train/val/test + flips
+├── setup_dataset.py          # Optional dataset prep
 ├── .gitignore
 ├── README.md
+├── docs/images/              # README assets (versioned)
 │
-├── pipeline/                 # OOP karşılaştırma hattı
-│   ├── orchestrator.py       # Tüm modülleri birleştiren ana orkestratör
-│   ├── models.py             # Model yükleme, Google Drive indirme, Factory
-│   ├── dataset.py            # CSV okuma, MLO+CC test çifti eşleştirme
-│   ├── evaluator.py          # Inference çalıştırma, metrik hesaplama
-│   ├── geometry.py           # DICOM↔640 koordinat dönüşümü, PNL/Depth
-│   ├── dicom_utils.py        # DICOM yükleme, VOI LUT, BGR dönüşümü
-│   └── visualizer.py         # DICOM grid çizimi, maske overlay
+├── pipeline/
+│   ├── orchestrator.py       # Compare pipeline coordinator
+│   ├── interfaces.py         # Protocols (DIP)
+│   ├── models.py             # Models, downloader, factory
+│   ├── dataset.py            # CSV + MLO/CC test pairing
+│   ├── evaluator.py          # Inference engine + metrics
+│   ├── geometry.py           # DICOM ↔ model space, PNL / depth
+│   ├── dicom_utils.py       # DICOM load, LUT, BGR
+│   └── visualizer.py         # DICOM grid + mask overlay
 │
-├── breast_seg/               # Segmentasyon analiz kütüphanesi
-│   ├── analyzer.py           # MLOAnalyzer — maske çıkarma, geometri
-│   ├── config.py             # Seg model ayarları
-│   ├── geometry.py           # Pectoral line fitting, nipple centroid
-│   ├── model.py              # YOLO seg wrapper
-│   └── visualizer.py         # Analiz görselleştirme
+├── breast_seg/               # Segmentation library
+│   ├── analyzer.py           # Mask → landmarks (MLO)
+│   ├── config.py             # Paths & hyperparameters
+│   ├── geometry.py
+│   ├── model.py              # YOLO seg wrapper (train/infer)
+│   └── visualizer.py
 │
-├── compare-dataset/          # (gitignore) Test verileri
-│   ├── labels/               # cc_labels.csv, mlo_labels.csv
-│   ├── CC/                   # CC PNG'ler + metadata.csv
-│   ├── MLO/                  # MLO PNG'ler + metadata.csv
-│   └── test_dicom/           # DICOM dosyaları ({study_uid}/{sop}.dicom)
-│
-├── pose_weights/             # (gitignore) Rule-based pose modelleri
-├── runs/                     # (gitignore) Eğitim çıktıları (best.pt)
-└── compare_output/           # (gitignore) Karşılaştırma çıktıları
-    ├── metrics_clinical.csv
-    ├── classification_metrics.csv
-    ├── confusion_matrix_pose.png
-    ├── confusion_matrix_seg.png
-    └── viz_dicom/            # DICOM görselleştirme PNG'leri
+├── compare-dataset/          # Usually gitignored: private test data
+├── pose_weights/             # Usually gitignored: MLO/CC pose weights
+├── runs/                     # Usually gitignored: training runs (best.pt)
+└── compare_output/           # Usually gitignored: metrics + viz_dicom PNGs
 ```
 
-## Kurulum
+## Setup
 
 ```bash
 pip install ultralytics opencv-python pandas pydicom scikit-learn seaborn matplotlib gdown tqdm
 ```
 
-## Kullanım
+Download **pose** weights into `pose_weights/` (see links below). Train or copy **segmentation** weights under `runs/breast_seg_yolo26m/weights/best.pt` for the compare pipeline.
 
-### Karşılaştırma Pipeline'ını Çalıştırma
+## Usage
+
+### Compare pipeline (metrics + optional DICOM figures)
 
 ```bash
-# Tüm test setini çalıştır
 python start.py compare
 
-# İlk N çiftle hızlı test
+# Quick run on first N pairs
 python start.py compare --limit 5
 
-# Görselleştirme olmadan sadece metrikler
+# Metrics only (skip DICOM visualization)
 python start.py compare --no-dicom-viz
+
+# Custom output directory
+python start.py compare --out compare_output
 ```
 
-### Segmentasyon Eğitimi
+### Train segmentation
 
 ```bash
 python start.py train
+# or
+python run_train.py
 ```
 
-## Klinik Metrikler
+### Build YOLO-seg dataset layout
 
-| Metrik | Açıklama |
-|--------|----------|
-| **PNL** | MLO görüntüsünde nipple'dan pectoral çizgiye dik mesafe (mm) |
-| **Depth** | CC görüntüsünde nipple'dan medial kenara (göğüs duvarı) mesafe (mm) |
-| **10mm Kuralı** | \|PNL − Depth\| ≤ 10mm ise **Good**, değilse **Bad** |
+After placing source images and labels under `seg-dataset/` as expected by `build_dataset.py`:
 
-## Çıktılar
+```bash
+python build_dataset.py
+```
 
-- `metrics_clinical.csv` — Tüm vakaların PNL, Depth, Error değerleri
-- `classification_metrics.csv` — Accuracy, Precision, Recall, F1 tablosu
-- `confusion_matrix_pose.png` / `confusion_matrix_seg.png` — Karşılaştırma matrisleri
-- `viz_dicom/*.png` — GT / Rule-Based / Seg-Model karşılaştırma görselleri
+## Clinical metrics
 
-## Pose Model İndirme
+| Term | Meaning |
+|------|---------|
+| **PNL** | On MLO: perpendicular distance (mm) from nipple to the pectoral line. |
+| **Depth** | On CC: distance (mm) from nipple to the medial chest wall. |
+| **10 mm rule** | Clinical pass if \|PNL − Depth\| ≤ 10 mm (**Good**), else **Bad**. |
 
-Pose modelleri `pose_weights/` dizinine konulmalı:
-- **MLO**: [Google Drive](https://drive.google.com/drive/folders/1V9j-Hm4j64lh2doTpoj4u07-F-vKNrUJ)
-- **CC**: [Google Drive](https://drive.google.com/drive/folders/11p_uYnbdJmnIjHbNgKMgkEe7mtsdyVQE)
+## Outputs (`compare_output/` by default)
 
-> `gdown` kuruluysa otomatik indirilir. Aksi halde modelleri indirip `pose_weights/` altına koyun.
+- `metrics_clinical.csv` — per-case PNL, depth, errors, landmark metrics  
+- `classification_metrics.csv` — accuracy / precision / recall / F1 vs qualitative labels  
+- `confusion_matrix_pose.png`, `confusion_matrix_seg.png`  
+- `viz_dicom/*.png` — multi-panel GT / pose / segmentation comparisons  
+
+## Pose model weights
+
+Place under `pose_weights/`:
+
+- **MLO**: [Google Drive folder](https://drive.google.com/drive/folders/1V9j-Hm4j64lh2doTpoj4u07-F-vKNrUJ)  
+- **CC**: [Google Drive folder](https://drive.google.com/drive/folders/11p_uYnbdJmnIjHbNgKMgkEe7mtsdyVQE)  
+
+If `gdown` is installed, missing files may be fetched automatically; otherwise download manually and copy the `.pt` files into `pose_weights/`.

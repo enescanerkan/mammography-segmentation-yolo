@@ -13,9 +13,9 @@ def _default_train_device() -> str:
 
 
 def _default_workers() -> int:
-    """Windows'ta çok iş parçacığı DataLoader ilk epoch öncesi takılma/sessiz çıkışa yol açabiliyor.
+    """On Windows, many DataLoader workers can hang or exit silently before epoch 1.
 
-    Geçersiz kıl: `BREAST_SEG_WORKERS` (örn. 4).
+    Override with `BREAST_SEG_WORKERS` (e.g. 4).
     """
     raw = os.environ.get("BREAST_SEG_WORKERS")
     if raw is not None:
@@ -59,7 +59,7 @@ class Config:
     def runs_dir(self) -> Path:
         return self.project_root / "runs"
 
-    # ── Class Mapping (seg-dataset/data.yaml ile uyumlu) ──
+    # ── Class mapping (aligned with seg-dataset/data.yaml) ──
     CLASS_NAMES: Dict[int, str] = field(default_factory=lambda: {
         0: "pectoral",
         1: "breast-tissue",
@@ -83,9 +83,8 @@ class Config:
     patience: int = 20
     workers: int = field(default_factory=_default_workers)
     run_name: str = "breast_seg_yolo26m"
-    # AMP (FP16): Windows + bazı laptop GPU / cuDNN sürümlerinde
-    # CUDNN_STATUS_EXECUTION_FAILED_CUDART üretebiliyor. Varsayılan kapalı.
-    # Hız için denemek istersen: BREAST_SEG_AMP=1 ortam değişkeni veya True yap.
+    # AMP (FP16): some Windows laptops / cuDNN builds raise CUDNN_STATUS_EXECUTION_FAILED_CUDART.
+    # Disabled by default. To try AMP: set env BREAST_SEG_AMP=1 or force True below.
     use_amp: bool = field(
         default_factory=lambda: os.environ.get("BREAST_SEG_AMP", "").lower() in ("1", "true", "yes")
     )

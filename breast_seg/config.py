@@ -1,8 +1,26 @@
 """Centralized configuration for the breast segmentation project."""
 
+import os
+import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict
+
+
+def _default_train_device() -> str:
+    """First CUDA GPU (`0`) by default. Override with env `BREAST_SEG_DEVICE` (e.g. `cpu`, `1`)."""
+    return os.environ.get("BREAST_SEG_DEVICE", "0")
+
+
+def _default_workers() -> int:
+    """Windows'ta çok iş parçacığı DataLoader ilk epoch öncesi takılma/sessiz çıkışa yol açabiliyor.
+
+    Geçersiz kıl: `BREAST_SEG_WORKERS` (örn. 4).
+    """
+    raw = os.environ.get("BREAST_SEG_WORKERS")
+    if raw is not None:
+        return max(0, int(raw))
+    return 0 if sys.platform == "win32" else 4
 
 
 @dataclass
@@ -14,7 +32,8 @@ class Config:
     """
 
     # ── Paths ──────────────────────────────────────────────
-    base_dir: Path = Path(r"C:\Users\Monster\Desktop\segment_breast")
+    project_root: Path = Path(__file__).resolve().parents[1]
+    base_dir: Path = Path(__file__).resolve().parents[1] / "seg-dataset"
 
     @property
     def data_yaml(self) -> Path:
@@ -22,7 +41,7 @@ class Config:
 
     @property
     def weights_path(self) -> Path:
-        return self.base_dir / "runs" / "breast_seg_yolo11" / "weights" / "best.pt"
+        return self.project_root / "runs" / "breast_seg_yolo26m" / "weights" / "best.pt"
 
     @property
     def test_images_dir(self) -> Path:
@@ -30,39 +49,46 @@ class Config:
 
     @property
     def predictions_dir(self) -> Path:
-        return self.base_dir / "predictions"
+        return self.project_root / "predictions"
 
     @property
     def analysis_output_dir(self) -> Path:
-        return self.base_dir / "analysis_output"
+        return self.project_root / "analysis_output"
 
     @property
     def runs_dir(self) -> Path:
-        return self.base_dir / "runs"
+        return self.project_root / "runs"
 
-    # ── Class Mapping ──────────────────────────────────────
+    # ── Class Mapping (seg-dataset/data.yaml ile uyumlu) ──
     CLASS_NAMES: Dict[int, str] = field(default_factory=lambda: {
-        0: "Nipple",
-        1: "Breast Tissue",
-        2: "Pectoral Muscle",
+        0: "pectoral",
+        1: "breast-tissue",
+        2: "nipple",
     })
 
-    NIPPLE_CLASS_ID: int = 0
+    PECTORAL_MUSCLE_CLASS_ID: int = 0
     BREAST_TISSUE_CLASS_ID: int = 1
-    PECTORAL_MUSCLE_CLASS_ID: int = 2
+    NIPPLE_CLASS_ID: int = 2
 
     # ── Model Defaults ─────────────────────────────────────
-    model_name: str = "yolo11n-seg.pt"
+    model_name: str = "yolo26m-seg.pt"
     image_size: int = 640
     confidence_threshold: float = 0.25
     iou_threshold: float = 0.5
-    device: str = "0"
+    device: str = field(default_factory=_default_train_device)
 
     # ── Training Defaults ──────────────────────────────────
     epochs: int = 100
     batch_size: int = 8
     patience: int = 20
-    workers: int = 4
+    workers: int = field(default_factory=_default_workers)
+    run_name: str = "breast_seg_yolo26m"
+    # AMP (FP16): Windows + bazı laptop GPU / cuDNN sürümlerinde
+    # CUDNN_STATUS_EXECUTION_FAILED_CUDART üretebiliyor. Varsayılan kapalı.
+    # Hız için denemek istersen: BREAST_SEG_AMP=1 ortam değişkeni veya True yap.
+    use_amp: bool = field(
+        default_factory=lambda: os.environ.get("BREAST_SEG_AMP", "").lower() in ("1", "true", "yes")
+    )
 
     def ensure_output_dirs(self) -> None:
         """Create output directories if they don't exist."""

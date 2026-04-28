@@ -40,7 +40,7 @@ class SegmentationModel:
         cfg = self._config
 
         if torch.cuda.is_available():
-            # Kararlılık: bazı ortamlarda benchmark=True + AMP cuDNN hatasına yol açıyor.
+            # Stability: benchmark=True + AMP can trigger cuDNN errors on some setups.
             torch.backends.cudnn.benchmark = False
 
         model.train(
@@ -57,7 +57,7 @@ class SegmentationModel:
             name=cfg.run_name,
             exist_ok=True,
             # Augmentation
-            # Note: manuel yatay flip dataset'te hazır, Ultralytics fliplr'i kapatıyoruz.
+            # Horizontal flips are prebuilt in the dataset; disable Ultralytics fliplr.
             flipud=0.0,
             fliplr=0.0,
             mosaic=0.5,

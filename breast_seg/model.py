@@ -3,6 +3,7 @@
 from pathlib import Path
 from typing import List, Optional
 
+import torch
 from ultralytics import YOLO
 
 from breast_seg.config import Config
@@ -38,6 +39,10 @@ class SegmentationModel:
         model = self._load(Path(self._config.model_name))
         cfg = self._config
 
+        if torch.cuda.is_available():
+            # Kararlılık: bazı ortamlarda benchmark=True + AMP cuDNN hatasına yol açıyor.
+            torch.backends.cudnn.benchmark = False
+
         model.train(
             data=str(cfg.data_yaml),
             epochs=cfg.epochs,
@@ -46,12 +51,15 @@ class SegmentationModel:
             patience=cfg.patience,
             device=cfg.device,
             workers=cfg.workers,
+            amp=cfg.use_amp,
+            deterministic=False,
             project=str(cfg.runs_dir),
-            name="breast_seg_yolo11",
+            name=cfg.run_name,
             exist_ok=True,
             # Augmentation
+            # Note: manuel yatay flip dataset'te hazır, Ultralytics fliplr'i kapatıyoruz.
             flipud=0.0,
-            fliplr=0.5,
+            fliplr=0.0,
             mosaic=0.5,
             degrees=5.0,
             translate=0.1,

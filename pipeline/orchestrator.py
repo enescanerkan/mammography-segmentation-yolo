@@ -56,7 +56,7 @@ class PipelineOrchestrator:
 
     def run_compare(self):
         pairs = self.dataset.get_test_pairs(limit=self.limit)
-        print(f"[Orchestrator] {len(pairs)} MLO+CC test çifti bulundu.")
+        print(f"[Orchestrator] Found {len(pairs)} MLO+CC test pair(s).")
         
         rows = []
         c_p = 0
@@ -91,7 +91,7 @@ class PipelineOrchestrator:
             m_bgr, m_sp, _ = DicomUtils.load_dicom_bgr(mlo_dcm)
             c_bgr, c_sp, _ = DicomUtils.load_dicom_bgr(cc_dcm)
             
-            # Fallback: DICOM yoksa PNG'den oku
+            # Fallback: if DICOM is missing, read from PNG
             if m_bgr is None:
                 m_bgr = cv2.imread(str(mlo_png))
                 m_sp = float(m_meta.get("pixel_spacing", 0.085) or 0.085)
@@ -193,7 +193,7 @@ class PipelineOrchestrator:
                 self.visualizer.draw_dicom_grid(dicom_out, m_bgr, c_bgr, m_meta, c_meta, mlo_res, cc_res, pd.Series(row))
 
         if not rows:
-            print("[Orchestrator] Hiç veri işlenemedi!")
+            print("[Orchestrator] No cases were processed.")
             return
             
         df = pd.DataFrame(rows)
@@ -203,4 +203,4 @@ class PipelineOrchestrator:
         calc.summarize_landmark_errors(self.output_dir)
         
         df.to_csv(self.output_dir / "metrics_clinical.csv", index=False)
-        print(f"[Orchestrator] Bitti. İşlenen vaka: {c_p}. Sonuçlar '{self.output_dir}' dizininde.")
+        print(f"[Orchestrator] Done. Processed cases: {c_p}. Outputs: '{self.output_dir}'.")

@@ -1,24 +1,24 @@
 """
-Build the final YOLO-seg dataset:
+Build the final YOLO-seg dataset layout:
 
     seg-dataset/
         data.yaml
         images/
-            train/   <- orijinal + yatay flip augmentation
-            val/     <- orijinal + yatay flip augmentation
-            test/    <- sadece orijinal
+            train/   <- originals + horizontal flip augmentation
+            val/     <- originals + horizontal flip augmentation
+            test/    <- originals only (no flips)
         labels/
             train/
             val/
             test/
 
-Split: 80/10/10 (orijinal görüntü bazında).
-Augmentation: train+val içindeki her orijinal için _flipped eşleniği.
-  * Annotator tarafından üretilmiş bir _flipped varsa (aynı stem)
-    onu koru (poligon sayısı farklı olabilir, ayrı manuel anotasyon).
-  * Yoksa PIL.ImageOps.mirror + etiket x=1-x ile üret.
+Split: 80 / 10 / 10 by original image stem.
+Augmentation: for each original in train and val, ensure a `_flipped` pair exists.
+  * If the annotator already provided `stem_flipped.png` / `.txt`, keep it
+    (polygon counts may differ — separate manual annotation).
+  * Otherwise generate with PIL.ImageOps.mirror and label coords x -> 1 - x.
 
-Sınıflar (seg-dataset/labels/data.yaml ile uyumlu):
+Classes (aligned with seg-dataset data.yaml):
     0: pectoral
     1: breast-tissue
     2: nipple
@@ -120,7 +120,7 @@ def emit_flipped(stem: str, split: str, has_existing: bool) -> None:
 
 
 def delete_flipped_in_test_if_any(stem: str) -> None:
-    """Test split'e giden orijinalin flipped'ini dataset'e dahil etme."""
+    """Remove leftover flipped pairs for stems assigned to test (test has no flips)."""
     for p in [
         SRC_IMAGES_ROOT / f"{stem}_flipped.png",
         SRC_LABELS_TRAIN / f"{stem}_flipped.txt",
@@ -160,14 +160,14 @@ def cleanup_legacy() -> None:
 
 
 def purge_flat_images() -> None:
-    """Kökteki seg-dataset/images/*.png dosyalarından artakalan varsa sil."""
+    """Delete stray PNGs left in seg-dataset/images/ root after moves."""
     for p in SRC_IMAGES_ROOT.glob("*.png"):
         if p.is_file():
             p.unlink()
 
 
 def summary() -> None:
-    print("\n=== ÖZET ===")
+    print("\n=== SUMMARY ===")
     for split in ("train", "val", "test"):
         n_img = len(list(DST_IMG[split].glob("*.png")))
         n_lbl = len(list(DST_LBL[split].glob("*.txt")))
@@ -175,26 +175,26 @@ def summary() -> None:
 
 
 def main() -> None:
-    print("=== Dataset Build Başlıyor ===\n")
-    assert SRC_IMAGES_ROOT.exists() and SRC_LABELS_TRAIN.exists(), "Kaynak dizinler yok!"
+    print("=== Dataset build starting ===\n")
+    assert SRC_IMAGES_ROOT.exists() and SRC_LABELS_TRAIN.exists(), "Source directories missing!"
 
     ensure_dirs()
 
     originals, has_flipped = collect_originals()
     splits = split_stems(originals)
     for k, v in splits.items():
-        print(f"[INFO] {k}: {len(v)} orijinal")
+        print(f"[INFO] {k}: {len(v)} originals")
 
-    print("\n[1/4] Orijinalleri split klasörlerine taşı")
+    print("\n[1/4] Moving originals into split folders")
     for split, stems in splits.items():
         for stem in stems:
             move_original(stem, split)
 
-    print("\n[2/4] Test split: flipped'leri dahil etme")
+    print("\n[2/4] Test split: drop flipped pairs")
     for stem in splits["test"]:
         delete_flipped_in_test_if_any(stem)
 
-    print("\n[3/4] Train & Val için yatay flip augmentation")
+    print("\n[3/4] Horizontal flip augmentation for train and val")
     created_existing = 0
     created_generated = 0
     for split in ("train", "val"):
@@ -205,18 +205,18 @@ def main() -> None:
                 created_existing += 1
             else:
                 created_generated += 1
-    print(f"  Annotator-flipped taşındı: {created_existing}")
-    print(f"  PIL ile üretildi         : {created_generated}")
+    print(f"  Annotator flips moved : {created_existing}")
+    print(f"  PIL-generated flips  : {created_generated}")
 
-    print("\n[4/4] Eski yapıyı temizle")
+    print("\n[4/4] Cleanup legacy layout")
     purge_flat_images()
     cleanup_legacy()
 
     write_data_yaml()
-    print(f"\n[INFO] data.yaml yazıldı: {(SEG / 'data.yaml').relative_to(ROOT)}")
+    print(f"\n[INFO] Wrote data.yaml: {(SEG / 'data.yaml').relative_to(ROOT)}")
 
     summary()
-    print("\n[OK] Dataset hazır.")
+    print("\n[OK] Dataset ready.")
 
 
 if __name__ == "__main__":

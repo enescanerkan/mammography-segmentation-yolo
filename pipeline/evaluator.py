@@ -190,7 +190,7 @@ class MetricsCalculator:
             pd.DataFrame(metrics_rows).to_csv(output_dir / "classification_metrics.csv", index=False)
 
     def summarize_landmark_errors(self, output_dir: Path):
-        # MLO ve CC metriklerini ayırarak bilimsel formatta raporla
+        # Report MLO and CC landmark errors separately in a concise table.
         groups = {
             "MLO": {
                 "Nipple": ["mlo_pose_nip_err", "mlo_seg_nip_err"],

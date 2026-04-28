@@ -26,25 +26,25 @@ class ModelDownloader:
         if target_path.is_file():
             return target_path
             
-        print(f"[ModelDownloader] Ağırlık bulunamadı: {target_path}")
+        print(f"[ModelDownloader] Weights not found: {target_path}")
         try:
             import gdown
         except ImportError:
-            print("[WARN] gdown yüklü değil. Otomatik indirme için 'pip install gdown' yapabilirsiniz.")
-            print(f"[WARN] Veya ağırlığı {ModelDownloader.DRIVE_LINKS.get(view, '')} linkinden indirip buraya yerleştirin: {target_path}")
+            print("[WARN] gdown is not installed. Run `pip install gdown` for automatic downloads.")
+            print(f"[WARN] Or download weights from {ModelDownloader.DRIVE_LINKS.get(view, '')} and place at: {target_path}")
             return target_path
 
         # gdown cannot download an entire folder reliably easily without specific format,
         # but if we had the file IDs it would be direct. Since the user gave folder links,
         # we will attempt folder download if gdown supports it.
         try:
-            print(f"[ModelDownloader] {view} modeli Google Drive üzerinden indiriliyor...")
+            print(f"[ModelDownloader] Downloading {view} model from Google Drive...")
             url = ModelDownloader.DRIVE_LINKS.get(view)
             if url:
                 gdown.download_folder(url=url, output=str(target_path.parent), quiet=False)
                 # Note: gdown outputs the folder contents to the directory, it might be nested.
         except Exception as e:
-            print(f"[ERROR] İndirme başarısız: {e}")
+            print(f"[ERROR] Download failed: {e}")
         return target_path
 
 
@@ -58,7 +58,7 @@ class BaseModel(ABC):
         if self.weights_path.is_file():
             self.model = YOLO(str(self.weights_path))
         else:
-            print(f"[WARN] YOLO modeli bulunamadı: {self.weights_path}", file=sys.stderr)
+            print(f"[WARN] YOLO weights not found: {self.weights_path}", file=sys.stderr)
             # Default fallback behaviour can be added.
             self.model = YOLO("yolo26l-pose.pt") if "pose" in str(self.weights_path).lower() else None
 

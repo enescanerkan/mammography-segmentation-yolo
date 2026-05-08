@@ -1,0 +1,11 @@
+# Large weights and experiment outputs
+checkpoints/
+work_dir/
+vendor/
+data/raw_mammo/
+data/medsam2_npy*/
+__pycache__/
+*.pyc
+*.pt
+*.pth
+.DS_Store

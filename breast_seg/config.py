@@ -8,8 +8,24 @@ from typing import Dict
 
 
 def _default_train_device() -> str:
-    """First CUDA GPU (`0`) by default. Override with env `BREAST_SEG_DEVICE` (e.g. `cpu`, `1`)."""
-    return os.environ.get("BREAST_SEG_DEVICE", "0")
+    """CUDA GPU `0` if available; otherwise `cpu`. Override with `BREAST_SEG_DEVICE`."""
+    raw = os.environ.get("BREAST_SEG_DEVICE")
+    if raw is not None and str(raw).strip() != "":
+        return raw
+    try:
+        import torch
+
+        return "0" if torch.cuda.is_available() else "cpu"
+    except ImportError:
+        return "cpu"
+
+
+def _env_int(name: str, default: int) -> int:
+    """Read positive int from env, or use default."""
+    raw = os.environ.get(name)
+    if raw is None or str(raw).strip() == "":
+        return default
+    return max(1, int(raw))
 
 
 def _default_workers() -> int:
@@ -78,9 +94,10 @@ class Config:
     device: str = field(default_factory=_default_train_device)
 
     # ── Training Defaults ──────────────────────────────────
-    epochs: int = 100
-    batch_size: int = 8
-    patience: int = 20
+    # Override from terminal: BREAST_SEG_EPOCHS, BREAST_SEG_BATCH, BREAST_SEG_PATIENCE
+    epochs: int = field(default_factory=lambda: _env_int("BREAST_SEG_EPOCHS", 100))
+    batch_size: int = field(default_factory=lambda: _env_int("BREAST_SEG_BATCH", 8))
+    patience: int = field(default_factory=lambda: _env_int("BREAST_SEG_PATIENCE", 15))
     workers: int = field(default_factory=_default_workers)
     run_name: str = "breast_seg_yolo26m"
     # AMP (FP16): some Windows laptops / cuDNN builds raise CUDNN_STATUS_EXECUTION_FAILED_CUDART.

@@ -34,7 +34,11 @@ def parse_yolo_seg_lines(text: str) -> list[tuple[int, np.ndarray]]:
             continue
         parts = raw.split()
         cls = int(parts[0])
-        coords = np.array([float(x) for x in parts[1:]], dtype=np.float64)
+        tail = parts[1:]
+        # Some compare-dataset exports append a stray trailing class id (0/1/2) on the same line.
+        if len(tail) % 2 == 1 and tail and tail[-1] in ("0", "1", "2"):
+            tail = tail[:-1]
+        coords = np.array([float(x) for x in tail], dtype=np.float64)
         if coords.size < 6 or coords.size % 2 != 0:
             continue
         poly = coords.reshape(-1, 2)
@@ -156,7 +160,8 @@ def main() -> None:
     print(f"  skipped (no label / empty / unreadable): {n_skip}")
     if n_warn:
         print(f"  renamed duplicates with split prefix: {n_warn}")
-    print("Next: cd medsam2_experiments && python zero_shot_test.py")
+    print("Next: from repo root use  python medsam2_experiments/zero_shot_test.py")
+    print("     or already inside medsam2_experiments:  python zero_shot_test.py")
 
 
 if __name__ == "__main__":

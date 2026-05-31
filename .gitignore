@@ -34,6 +34,20 @@ pose_weights/**/*.pt
 # Kök dizine indirilen Ultralytics hub checkpoint’leri (ör. yolo26l-pose.pt)
 /*.pt
 
+# Legacy staging directory (positioning app ported into qt_app/positioning)
+eklenecek/
+
+# Runtime logs (rolling files written by qt_app.logging_setup)
+medsam2_experiments/logs/
+
+# Annotation tool YOLO checkpoints (downloaded separately, see docs/)
+medsam2_experiments/qt_app/weights/
+medsam2_experiments/qt_app/positioning/weights/
+
+# Generated label / result artifacts from the GUIs
+medsam2_experiments/qt_app/positioning/results/
+**/labels/*.txt
+
 # IDE
 .vscode/
 .idea/

@@ -25,6 +25,11 @@ CHECKPOINT_DIR = EXP_ROOT / "checkpoints"
 MEDSAM2_WEIGHTS = CHECKPOINT_DIR / "MedSAM2_latest.pt"
 SAM2_BASE_WEIGHTS = CHECKPOINT_DIR / "sam2_hiera_tiny.pt"
 
+# `zero_shot_test.py` loads this into `build_sam2(SAM2_MODEL_CFG, ckpt, ...)`.
+# Use SAM2 tiny by default (matches MedSAM2 image fine-tune docs). HF `MedSAM2_latest.pt`
+# can mismatch `sam2_hiera_t.yaml` on some revisions; override with MEDSAM2_ZERO_SHOT_CKPT if you have a compatible file.
+ZERO_SHOT_CKPT = Path(os.environ.get("MEDSAM2_ZERO_SHOT_CKPT", str(SAM2_BASE_WEIGHTS)))
+
 # Raw data layout (you provide this — not the YOLO txt layout):
 #   data/raw_mammo/images/{case}.png
 #   data/raw_mammo/masks/{case}.png   # single-channel, integer class ids

@@ -3,7 +3,24 @@ checkpoints/
 work_dir/
 vendor/
 data/raw_mammo/
+data/zero_shot_output/
 data/medsam2_npy*/
+
+# PyQt5 GUI: runtime logs and downloaded model weights
+logs/
+qt_app/weights/
+qt_app/positioning/weights/
+qt_app/positioning/results/
+
+# YOLO label outputs produced by Save All in the annotation tools
+**/labels/*.txt
+
+# Smoke / debug scratch
+_qt_smoke_test.py
+debug_visualize_raw_mammo.py
+_fake_smoke.png
+
+# Python / OS caches
 __pycache__/
 *.pyc
 *.pt

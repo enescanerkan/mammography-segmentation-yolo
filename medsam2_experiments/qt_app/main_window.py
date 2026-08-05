@@ -118,19 +118,23 @@ def unregister_custom_tissue(key: str) -> None:
     custom class or when the window closes (back-to-menu cleanup)."""
     TISSUE_PRESETS.pop(key, None)
     TISSUE_RGB.pop(key, None)
-from PyQt5.QtCore import QSize, Qt, QTimer, pyqtSignal
+from PyQt5.QtCore import QEvent, QSize, Qt, QTimer, pyqtSignal
 from PyQt5.QtGui import QKeySequence
 from PyQt5.QtWidgets import (
+    QAbstractSpinBox,
     QAction,
+    QApplication,
     QButtonGroup,
     QCheckBox,
     QColorDialog,
+    QComboBox,
     QDialog,
     QFileDialog,
     QFrame,
     QHBoxLayout,
     QInputDialog,
     QLabel,
+    QLineEdit,
     QListWidget,
     QListWidgetItem,
     QMainWindow,
@@ -161,6 +165,7 @@ from .canvas import (
 )
 from .detector import BoxDetector, Detection, run_detector_async
 from .image_io import load_image_rgb
+from .pnl_analysis import analyze_annotation
 from .session import AnnotationSession, list_images, tissue_to_yolo_id
 from .theme import (
     ACCENT,
@@ -819,6 +824,14 @@ class MainWindow(QMainWindow):
         footer.setObjectName("sideFooter")
         fl = QVBoxLayout(footer)
         fl.setContentsMargins(14, 12, 14, 14)
+        self._btn_calc = QPushButton("📐  Hesapla (PNL / CC)")
+        self._btn_calc.setMinimumHeight(40)
+        self._btn_calc.setToolTip(
+            "Nipple + Pectoral (MLO) etiketliyse PNL'i, sadece Nipple + Breast "
+            "(CC) ise meme derinliğini çizer (C)"
+        )
+        self._btn_calc.clicked.connect(self._calculate_geometry)
+        fl.addWidget(self._btn_calc)
         self._btn_save_all = QPushButton("💾  Save All to YOLO")
         self._btn_save_all.setObjectName("primary")
         self._btn_save_all.setMinimumHeight(40)
@@ -1081,6 +1094,11 @@ class MainWindow(QMainWindow):
         a_reset_wl.setToolTip("Reset brightness/contrast (right-drag = window/level)")
         a_reset_wl.triggered.connect(lambda: self._canvas.reset_window_level())
 
+        a_calc = QAction("📐 Hesapla (PNL/CC)", self)
+        a_calc.setShortcut("C")
+        a_calc.setToolTip("Etiketlenen dokulardan PNL / CC derinliğini hesapla ve çiz (C)")
+        a_calc.triggered.connect(self._calculate_geometry)
+
         tb = QToolBar("Main")
         tb.setMovable(False)
         tb.setToolButtonStyle(Qt.ToolButtonTextOnly)
@@ -1094,6 +1112,7 @@ class MainWindow(QMainWindow):
         a_zoom_out.setIconText("Zoom −")
         a_fit.setIconText("Fit View")
         a_reset_wl.setIconText("Reset W/L")
+        a_calc.setIconText("📐 Hesapla")
         a_commit.setIconText("✓ Commit")
         a_back.setIconText("← Menu")
 
@@ -1107,13 +1126,21 @@ class MainWindow(QMainWindow):
         tb.addAction(a_fit)
         tb.addAction(a_reset_wl)
         tb.addSeparator()
+        tb.addAction(a_calc)
+        tb.addSeparator()
         tb.addAction(a_commit)
         tb.addSeparator()
         tb.addAction(a_back)
 
     def _build_shortcuts(self) -> None:
-        QShortcut(QKeySequence(Qt.Key_Left), self, activated=self._goto_prev)
-        QShortcut(QKeySequence(Qt.Key_Right), self, activated=self._goto_next)
+        # Left/Right navigation is handled by an application-level event
+        # filter (see eventFilter) rather than a QShortcut. The canvas is a
+        # QGraphicsView with StrongFocus; once you click into it, it consumes
+        # the arrow keys for its own scrolling before a WindowShortcut can
+        # fire — which is exactly why arrow navigation "stops working" after
+        # the first click. Filtering at the QApplication level catches the
+        # key press before any focused child widget sees it.
+        QApplication.instance().installEventFilter(self)
         QShortcut(QKeySequence("B"), self, activated=lambda: self._rb_mode_box.setChecked(True))
         QShortcut(QKeySequence("P"), self, activated=lambda: self._rb_mode_point.setChecked(True))
         QShortcut(QKeySequence("1"), self, activated=lambda: self._select_tissue("pectoral"))
@@ -1145,6 +1172,21 @@ class MainWindow(QMainWindow):
         self._refresh_image_list()
         self._load_image_by_index(0)
 
+    def _resume_index(self, paths: list[Path]) -> int:
+        """Where to reopen a partially labeled folder.
+
+        A labeled image is one that already has ``<images_dir>/labels/<stem>.txt``
+        (the path :mod:`qt_app.session` exports to). We resume right after the
+        LAST labeled image rather than at the first unlabeled one, so images
+        that were deliberately skipped mid-run do not drag the session back to
+        the beginning. Returns 0 when nothing is labeled yet.
+        """
+        last_labeled = -1
+        for idx, p in enumerate(paths):
+            if (p.parent / "labels" / f"{p.stem}.txt").exists():
+                last_labeled = idx
+        return min(last_labeled + 1, len(paths) - 1)
+
     def _open_folder_path(self, folder: Path) -> None:
         paths = list_images(folder, recursive=True)
         if not paths:
@@ -1160,7 +1202,11 @@ class MainWindow(QMainWindow):
         self._image_paths = paths
         self._current_idx = -1
         self._refresh_image_list()
-        self._load_image_by_index(0)
+        start = self._resume_index(paths)
+        if start:
+            log.info("Resuming at %d/%d (%d already labeled)",
+                     start + 1, len(paths), start)
+        self._load_image_by_index(start)
 
     def _refresh_image_list(self) -> None:
         self._image_list.clear()
@@ -2057,6 +2103,39 @@ class MainWindow(QMainWindow):
             details = "\n".join(f"{p.name}: {e}" for p, e in report.errors[:8])
             QMessageBox.warning(self, "Save errors", details)
 
+    def _calculate_geometry(self) -> None:
+        """Compute & draw the PNL (MLO) or CC-depth (CC) measurement from the
+        currently-labelled tissues on this image."""
+        path = self._current_image_path
+        if path is None:
+            self._status.showMessage("Önce bir görüntü açın.", 4000)
+            return
+        # Flush the in-flight canvas edit so the freshest masks are analysed.
+        self._persist_current_prompts()
+        ann = self._session.get(path)
+        if ann is None or not ann.has_any_mask():
+            self._canvas.clear_analysis_overlay()
+            self._status.showMessage(
+                "Hesaplama için en az Nipple + (Pectoral veya Breast) etiketleyin.", 6000
+            )
+            return
+
+        result = analyze_annotation(ann)
+        if result.ok:
+            self._canvas.show_analysis_overlay(result)
+            if result.pnl is not None:
+                self._status.showMessage(
+                    f"MLO • PNL = {result.pnl.distance_px:.1f} px", 8000
+                )
+            elif result.cc_depth is not None:
+                self._status.showMessage(
+                    f"CC • Derinlik = {result.cc_depth.distance_px:.1f} px", 8000
+                )
+        else:
+            self._canvas.clear_analysis_overlay()
+            msg = " ".join(result.messages) or "Ölçüm hesaplanamadı."
+            self._status.showMessage(msg, 6000)
+
     # ─── Helpers ───────────────────────────────────────────────────────
 
     @property
@@ -2094,6 +2173,23 @@ class MainWindow(QMainWindow):
                 else:
                     self._hdr_subtitle.setText("No class — add one to start")
         self._lbl_dirty.setText(f"Pending: {self._session.annotated_image_count()} images")
+
+    def eventFilter(self, obj, event):
+        # Left/Right = previous/next image, no matter which child widget has
+        # focus. Installed on the QApplication so it runs before the canvas
+        # (a StrongFocus QGraphicsView) can eat the arrows for its own
+        # scrolling. Skipped while a text field is focused so arrow keys still
+        # move the cursor when typing (e.g. a class-name dialog).
+        if event.type() == QEvent.KeyPress and event.key() in (Qt.Key_Left, Qt.Key_Right):
+            fw = QApplication.focusWidget()
+            if isinstance(fw, (QLineEdit, QComboBox, QAbstractSpinBox)):
+                return False
+            if event.key() == Qt.Key_Left:
+                self._goto_prev()
+            else:
+                self._goto_next()
+            return True  # consume: canvas must not also scroll
+        return super().eventFilter(obj, event)
 
     def closeEvent(self, event) -> None:
         # If we already asked (e.g. via Back-to-Menu), skip the second prompt.

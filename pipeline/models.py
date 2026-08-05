@@ -67,16 +67,61 @@ class BaseModel(ABC):
         pass
 
 
+_WAVELET_WARNED = False
+
+
+def _wavelet_enhance(im_bgr: np.ndarray) -> np.ndarray:
+    """NLM denoise -> Daubechies-4 (level 2) edge boost -> CLAHE.
+
+    The advanced pose models (`*-yolo26-pose-advanced.pt`) were TRAINED on
+    images passed through this exact enhancement (NLM+Wavelet+CLAHE). Feeding
+    raw images at inference is out-of-distribution and degrades keypoints, so
+    the compare pipeline must apply the same preprocessing here. Mirrors
+    eklenecek/.../src/preprocessing/strategies.py::AdvancedWaveletStrategy.
+    """
+    import pywt
+    gray = cv2.cvtColor(im_bgr, cv2.COLOR_BGR2GRAY) if im_bgr.ndim == 3 else im_bgr
+    denoised = cv2.fastNlMeansDenoising(gray, None, h=8, templateWindowSize=5, searchWindowSize=11)
+    coeffs = pywt.wavedec2(denoised.astype(np.float64), "db4", level=2)
+    boosted = [coeffs[0]]
+    for lvl, (cH, cV, cD) in enumerate(coeffs[1:], start=1):
+        f = 1.3 if lvl == 1 else 1.6
+        boosted.append((cH * f, cV * f, cD * f))
+    rec = pywt.waverec2(boosted, "db4")[: gray.shape[0], : gray.shape[1]]
+    enhanced = np.clip(rec, 0, 255).astype(np.uint8)
+    enhanced = cv2.createCLAHE(clipLimit=2.5, tileGridSize=(8, 8)).apply(enhanced)
+    return cv2.cvtColor(enhanced, cv2.COLOR_GRAY2BGR)
+
+
 class PoseModel(BaseModel):
     def predict(self, image_path: Path, min_keypoints: int = 1) -> Optional[np.ndarray]:
         """Runs multi-confidence inference for mammography YOLO Pose."""
         if self.model is None:
             return None
-            
+
         im = cv2.imread(str(image_path))
         if im is None:
             return None
-            
+
+        # Pose models are wavelet-trained -> apply matching enhancement.
+        # Toggle off with POSE_WAVELET=0 to compare raw-input behaviour.
+        if os.environ.get("POSE_WAVELET", "1") != "0":
+            try:
+                im = _wavelet_enhance(im)
+            except Exception as exc:
+                # Do NOT fail silently: without the enhancement the pose models
+                # run out-of-distribution and accuracy drops (0.815 -> 0.753)
+                # with nothing in the output to explain why. Warn once.
+                global _WAVELET_WARNED
+                if not _WAVELET_WARNED:
+                    _WAVELET_WARNED = True
+                    print(
+                        f"[WARN] Wavelet preprocessing unavailable ({exc}). Pose "
+                        f"models are wavelet-trained, so results will be degraded. "
+                        f"Install PyWavelets, or set POSE_WAVELET=0 to silence this.",
+                        file=sys.stderr,
+                    )
+
         confs = (0.25, 0.15, 0.1, 0.05, 0.025, 0.01, 0.005, 0.001)
         for c in confs:
             res = self.model.predict(source=im, conf=float(c), iou=0.45, imgsz=640, verbose=False)[0]

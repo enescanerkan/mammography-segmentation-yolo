@@ -42,13 +42,13 @@ class PipelineOrchestrator:
         pose_mlo = model_fac.get_pose_model("MLO")
         pose_cc = model_fac.get_pose_model("CC")
         
-        # Look for seg weights
-        seg_weights_dir = self.root_dir / "runs" / "breast_seg_yolo26m" / "weights"
-        seg_path = seg_weights_dir / "best.pt"
-        if not seg_path.is_file() and (seg_weights_dir / "last.pt").is_file():
-            seg_path = seg_weights_dir / "last.pt"
-            
+        # Seg weights come from Config so training and compare can never drift
+        # apart (default: v4 — CSV-split with Test held out -> leak-free compare).
         seg_cfg = Config()
+        seg_path = seg_cfg.weights_path
+        if not seg_path.is_file() and seg_path.with_name("last.pt").is_file():
+            seg_path = seg_path.with_name("last.pt")
+
         seg_model = model_fac.get_segmentation_model(seg_path) if seg_path.is_file() else None
 
         self.engine = InferenceEngine(pose_mlo, pose_cc, seg_model, seg_cfg)

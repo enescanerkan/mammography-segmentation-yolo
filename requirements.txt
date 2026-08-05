@@ -6,3 +6,19 @@ tqdm>=4.65.0
 numpy>=1.24.0
 pydicom>=2.4.0
 # torch: ultralytics kurulumu ile gelir; GPU icin CUDA'li surum ayni komutla secilebilir
+
+# Wavelet on-isleme. Pose modelleri (*-yolo26-pose-advanced.pt) NLM+db4+CLAHE
+# ile isletilmis goruntuler uzerinde EGITILDI; bu paket olmadan compare
+# pipeline ham goruntu besler ve pose dogrulugu 0.815'ten 0.753'e duser.
+PyWavelets>=1.4
+
+# Qt5 desktop toolkit (medsam2_qt_demo.py)
+PyQt5>=5.15
+
+# Compressed-DICOM decoders. Mammography studies are typically stored
+# as JPEG Lossless (Process 14) and JPEG 2000 — pydicom needs an extra
+# plugin to decode either. Without these, the image_io loader raises
+# "Unable to decompress … all plugins are missing dependencies".
+pylibjpeg>=2.0
+pylibjpeg-libjpeg>=2.1   # JPEG (including Lossless / Process 14)
+pylibjpeg-openjpeg>=2.4  # JPEG 2000

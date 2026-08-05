@@ -55,6 +55,7 @@ from PyQt5.QtWidgets import (
     QGraphicsScene,
     QGraphicsTextItem,
     QGraphicsView,
+    QLabel,
 )
 
 from interactive.prompts import TISSUE_PRESETS, BoxPrompt, PromptState
@@ -77,6 +78,7 @@ Z_BOX = 50
 Z_IGNORE_DISK = 60
 Z_POINT = 100
 Z_HANDLE = 110
+Z_ANALYSIS = 200  # PNL / CC-depth measurement overlay — drawn above everything
 
 
 MODE_IDLE = "idle"           # nothing selected — clicks do not annotate
@@ -347,6 +349,20 @@ class MammoCanvas(QGraphicsView):
         self._mask_arrays: dict[str, np.ndarray] = {}
         self._mask_alpha: int = 38  # 0..255 — 15 % default (matches the side-panel slider)
 
+        # PNL / CC-depth measurement overlay (scene items) + a fixed HUD
+        # label pinned to the top-left of the viewport.
+        self._analysis_items: list = []
+        self._hud = QLabel(self.viewport())
+        self._hud.setObjectName("analysisHud")
+        self._hud.setStyleSheet(
+            "QLabel#analysisHud {"
+            " background-color: rgba(0,0,0,170); color: #e8e8e8;"
+            " padding: 8px 12px; border-radius: 6px;"
+            " font-family: 'Consolas','Courier New',monospace; font-size: 12px; }"
+        )
+        self._hud.move(12, 12)
+        self._hud.hide()
+
         # Whether right-click in BOX / POINT modes drops a SAM-style
         # "ignore" point. Manual mode has no such concept — MainWindow
         # toggles this off there to keep right-click reserved for the
@@ -389,6 +405,11 @@ class MammoCanvas(QGraphicsView):
         self._other_outline_items = []
         self._other_outline_data = []
         self._state = PromptState()
+
+        # Drop any stale measurement overlay from the previous image. The
+        # scene.clear() above already deleted the underlying items.
+        self._analysis_items = []
+        self._hud.hide()
 
         self._base_rgb = np.ascontiguousarray(rgb.astype(np.uint8))
         self._window = 0.0
@@ -434,6 +455,94 @@ class MammoCanvas(QGraphicsView):
             # silently rather than crashing the W/L slider / reset hot
             # paths. The user can pick a new file from the list.
             pass
+
+    # ─── PNL / CC-depth measurement overlay ────────────────────────────
+
+    def clear_analysis_overlay(self) -> None:
+        """Remove the measurement lines, markers and HUD."""
+        for it in self._analysis_items:
+            self._safe_remove(it)
+        self._analysis_items = []
+        self._hud.hide()
+
+    def show_analysis_overlay(self, result) -> None:
+        """Draw the PNL (MLO) or CC-depth (CC) overlay from an
+        ``pnl_analysis.AnalysisResult``."""
+        self.clear_analysis_overlay()
+        if self._image_item is None:
+            return
+
+        h, w = self._image_hw
+        marker_r = max(3.0, 0.006 * max(h, w))
+
+        if result.is_mlo:
+            line = result.pectoral_line
+            if line is not None:
+                for bx, by in line.boundary_points:
+                    self._add_marker(bx, by, marker_r * 0.6, QColor(255, 255, 0))  # yellow
+                self._add_line(line.point_a, line.point_b, QColor(0, 255, 0), 2)    # green
+            pnl = result.pnl
+            if pnl is not None:
+                self._add_line(pnl.nipple_center, pnl.foot_point, QColor(255, 40, 40), 2)  # red
+                self._add_marker(*pnl.nipple_center, marker_r, QColor(255, 0, 255))         # magenta
+                self._add_marker(*pnl.foot_point, marker_r, QColor(0, 255, 255))            # cyan
+                mid = ((pnl.nipple_center[0] + pnl.foot_point[0]) // 2,
+                       (pnl.nipple_center[1] + pnl.foot_point[1]) // 2)
+                self._add_text(f"PNL: {pnl.distance_px:.1f} px", mid, "#ff5050")
+        else:
+            cc = result.cc_depth
+            if cc is not None:
+                self._add_line(cc.nipple_center, cc.edge_point, QColor(255, 165, 0), 2)  # orange
+                self._add_marker(*cc.nipple_center, marker_r, QColor(255, 0, 255))        # magenta
+                self._add_marker(*cc.edge_point, marker_r, QColor(0, 255, 255))           # cyan
+                mid = ((cc.nipple_center[0] + cc.edge_point[0]) // 2, cc.nipple_center[1])
+                self._add_text(f"CC Depth: {cc.distance_px:.1f} px", mid, "#ffa500")
+
+        self._update_hud(result)
+
+    def _add_line(self, p1, p2, color: QColor, width: int) -> None:
+        pen = QPen(color, width)
+        pen.setCosmetic(True)  # constant on-screen width regardless of zoom
+        pen.setCapStyle(Qt.RoundCap)
+        item = self._scene.addLine(QLineF(QPointF(*p1), QPointF(*p2)), pen)
+        item.setZValue(Z_ANALYSIS)
+        self._analysis_items.append(item)
+
+    def _add_marker(self, x: float, y: float, r: float, color: QColor) -> None:
+        item = self._scene.addEllipse(
+            x - r, y - r, 2 * r, 2 * r, QPen(Qt.NoPen), QBrush(color)
+        )
+        item.setZValue(Z_ANALYSIS + 1)
+        self._analysis_items.append(item)
+
+    def _add_text(self, text: str, pos, color_hex: str) -> None:
+        item = QGraphicsTextItem()
+        item.setHtml(
+            f'<div style="background-color: rgba(0,0,0,200); color: {color_hex};'
+            f' padding: 1px 4px;">{text}</div>'
+        )
+        item.setFlag(QGraphicsItem.ItemIgnoresTransformations, True)  # stay readable at any zoom
+        item.setPos(QPointF(pos[0], pos[1]))
+        item.setZValue(Z_ANALYSIS + 2)
+        self._scene.addItem(item)
+        self._analysis_items.append(item)
+
+    def _update_hud(self, result) -> None:
+        if result.is_mlo:
+            view, pec = "MLO", "DETECTED"
+        else:
+            view, pec = "CC", "NOT FOUND"
+        nip = "DETECTED" if result.has_nipple else "NOT FOUND"
+        lines = [f"View: {view}", f"Pectoral Muscle: {pec}", f"Nipple: {nip}"]
+        if result.pnl is not None:
+            lines.append(f"PNL: {result.pnl.distance_px:.1f} px")
+        if result.cc_depth is not None:
+            lines.append(f"CC Depth: {result.cc_depth.distance_px:.1f} px")
+        self._hud.setText("\n".join(lines))
+        self._hud.adjustSize()
+        self._hud.move(12, 12)
+        self._hud.show()
+        self._hud.raise_()
 
     def set_active_tissue(self, tissue_key: str) -> None:
         self._active_tissue = tissue_key
@@ -528,6 +637,7 @@ class MammoCanvas(QGraphicsView):
         self._rebuild_prompt_graphics()
         self._cancel_polygon_draw()
         self._clear_polygon_graphics()
+        self.clear_analysis_overlay()
         self._poly_points = []
         for key in list(self._mask_items.keys()):
             item = self._mask_items.pop(key)

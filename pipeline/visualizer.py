@@ -43,9 +43,14 @@ class ResultVisualizer:
             bool_m = m_resized > 0.5
             
             mask_d = np.zeros((dh, dw), dtype=bool)
-            dh_crop = min(bool_m.shape[0], dh - cy1)
-            dw_crop = min(bool_m.shape[1], dw - cx1)
-            mask_d[cy1:cy1+dh_crop, cx1:cx1+dw_crop] = bool_m[:dh_crop, :dw_crop]
+            # Guard: if the paste origin falls outside the destination canvas
+            # (cx1>=dw or cy1>=dh), the crop width/height goes negative and the
+            # broadcast crashes. Clamp to a valid, non-negative region.
+            oy1 = max(0, min(cy1, dh)); ox1 = max(0, min(cx1, dw))
+            dh_crop = max(0, min(bool_m.shape[0], dh - oy1))
+            dw_crop = max(0, min(bool_m.shape[1], dw - ox1))
+            if dh_crop > 0 and dw_crop > 0:
+                mask_d[oy1:oy1+dh_crop, ox1:ox1+dw_crop] = bool_m[:dh_crop, :dw_crop]
             
             layer[mask_d] = np.array(colors[c], dtype=np.float32)
             weight[mask_d] = 1.0

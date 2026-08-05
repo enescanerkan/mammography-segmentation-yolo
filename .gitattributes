@@ -1,0 +1,23 @@
+# Repo was started on Windows (CRLF) and is now developed on Linux. Without
+# this, every file touched on Linux shows up as a full-file rewrite. Normalize
+# text to LF in the repository; Git still checks out the platform's native
+# ending when core.autocrlf is set locally.
+* text=auto eol=lf
+
+# Shell scripts must keep LF even on Windows checkouts, otherwise bash fails
+# with "\r: command not found".
+*.sh text eol=lf
+
+# Windows-only launcher stays CRLF.
+*.bat text eol=crlf
+
+# Binary — never diff, never touch line endings.
+*.pt   binary
+*.pth  binary
+*.onnx binary
+*.npy  binary
+*.png  binary
+*.jpg  binary
+*.jpeg binary
+*.dcm  binary
+*.pptx binary

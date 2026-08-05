@@ -15,13 +15,25 @@ venv/
 .env.*
 
 # Veri setleri ve ham DICOM (boyut)
+# seg-dataset* -> v1/v2/v3/v4 sürümlerinin hepsi (bkz. breast_seg/config.py)
 compare-dataset/
-seg-dataset/
+seg-dataset*/
+label_pool/
+# MedSAM2 fine-tune girdisi: MLO görüntülerinin .npy dökümü (~2 GB)
+mlo/
 
-# Karşılaştırma / inference çıktıları
-compare_output/
+# Karşılaştırma / inference çıktıları (compare_output, _v4, _v4fix, _wavelet ...)
+compare_output*/
+compare_viz_demo/
 predictions/
 analysis_output/
+
+# Yerel yardımcı scriptler + ürettikleri PNG/rapor klasörleri (~315 MB).
+# Bunlar deneysel, tek seferlik iş akışları; repoya girmez.
+tools/
+
+# Sunum / rapor dosyaları (büyük ikili)
+*.pptx
 
 # Eğitim koşuları (runs/weights, cache, grafikler)
 runs/
@@ -39,6 +51,11 @@ eklenecek/
 
 # Runtime logs (rolling files written by qt_app.logging_setup)
 medsam2_experiments/logs/
+medsam2_experiments/*_train_*.log
+
+# MedSAM2 fine-tune çıktıları: her koşu ~800 MB checkpoint
+medsam2_experiments/work_dir*/
+medsam2_experiments/checkpoints/
 
 # Annotation tool YOLO checkpoints (downloaded separately, see docs/)
 medsam2_experiments/qt_app/weights/
@@ -58,3 +75,11 @@ medsam2_experiments/qt_app/positioning/results/
 Thumbs.db
 Desktop.ini
 .DS_Store
+
+# VNC baglanti bilgileri (parola icerir)
+VNC_BAGLANTI.md
+
+# Yerel etiketleme ortami: makineye ozgu mutlak yollar + VNC/Xvfb kurulumu
+# iceriyor. Repoya almak istersen bu iki satiri sil.
+baslat_etiketleme.sh
+ETIKETLEME_DEVAM_*.md

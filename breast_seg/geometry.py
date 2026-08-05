@@ -148,42 +148,27 @@ def fit_pectoral_line(
     else:
         pt_max = min(middle_points, key=lambda p: p[0])
 
-    dx = pt_bot[0] - pt_top[0]
-    dy = pt_bot[1] - pt_top[1]
-
-    if abs(dy) < 1e-6:
-        slope_orig = 0.0
-    else:
-        slope_orig = float(dx) / float(dy)
-
-    # 1. Compute shifted bottom X coordinate using pure horizontal translation semantics
-    shifted_bot_x = pt_max[0] + slope_orig * (pt_bot[1] - pt_max[1])
-
-    # 2. Refined bottom anchor correction: If the bottom point plunges too deep into breast tissue,
-    # pull it slightly back towards its original predicted bottom boundary.
-    # (Weighted 50% averaging between the rigidly shifted point and the original true bottom edge)
-    target_bot_x = (shifted_bot_x + pt_bot[0]) / 2.0
-
-    # 3. Pivot/Tilt the line conceptually.
-    # The line is strictly forced to pass through the outermost pt_max and drop down to target_bot_x.
-    dy_bot = pt_bot[1] - pt_max[1]
-    if abs(dy_bot) < 1e-6:
-        slope_new = slope_orig
-    else:
-        slope_new = (target_bot_x - pt_max[0]) / dy_bot
-        
-    # Calculate interception using the newly pivoted slope
-    intercept_new = pt_max[0] - slope_new * pt_max[1]
-
     h, w = image_shape
-    
+
+    # Rule (Enes): the BOTTOM anchor stays FIXED at the true bottom edge of the
+    # pectoral muscle. The line is drawn through that fixed bottom point and
+    # pt_max (the outermost pixel in the middle band = apex of the muscle's
+    # convex bulge), so the line runs TANGENT to the bulge. pec_top is then the
+    # point where this line reaches the topmost pectoral row (the shift of the
+    # top comes out of this geometry, not from moving the bottom).
     y_top_clamped = pt_top[1]
     y_bot_clamped = pt_bot[1]
-    
-    # Reproject top and bottom X coordinates based on the pt_max pivot
-    x_top_clamped = int(round(slope_new * y_top_clamped + intercept_new))
-    x_bot_clamped = int(round(slope_new * y_bot_clamped + intercept_new))
-    
+    x_bot_clamped = pt_bot[0]  # FIXED bottom anchor
+
+    dy_line = pt_bot[1] - pt_max[1]  # bottom is below the middle band -> > 0
+    if abs(dy_line) < 1e-6:
+        # Degenerate (muscle has ~no vertical extent below the middle): keep
+        # the raw top edge.
+        x_top_clamped = pt_top[0]
+    else:
+        slope_xy = (pt_bot[0] - pt_max[0]) / dy_line  # x = f(y) along the line
+        x_top_clamped = int(round(pt_max[0] + slope_xy * (pt_top[1] - pt_max[1])))
+
     x_top_clamped = max(0, min(w - 1, x_top_clamped))
     x_bot_clamped = max(0, min(w - 1, x_bot_clamped))
 

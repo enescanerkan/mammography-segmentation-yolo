@@ -49,15 +49,41 @@ class Config:
 
     # ── Paths ──────────────────────────────────────────────
     project_root: Path = Path(__file__).resolve().parents[1]
-    base_dir: Path = Path(__file__).resolve().parents[1] / "seg-dataset"
+
+    # Dataset generation. Every version is a full re-export, not an increment:
+    #   v1 ""   ->   169 images (hand-labelled seed set)
+    #   v2      ->  1857 images (+ MedSAM2-assisted labels)
+    #   v3      ->  2924 images (+ CC pseudo-labels, reviewed)
+    #   v4      ->  2924 images, split from the compare CSV so the Test cases
+    #               are held out -> the compare pipeline stays leak-free.
+    # Override with BREAST_SEG_DATASET (e.g. "_v3", or "" for the seed set).
+    dataset_version: str = field(
+        default_factory=lambda: os.environ.get("BREAST_SEG_DATASET", "_v4")
+    )
+
+    @property
+    def base_dir(self) -> Path:
+        return self.project_root / f"seg-dataset{self.dataset_version}"
 
     @property
     def data_yaml(self) -> Path:
         return self.base_dir / "data.yaml"
 
     @property
+    def run_name(self) -> str:
+        """`breast_seg_v4_yolo26m` for v4, `breast_seg_yolo26m` for the seed set."""
+        suffix = self.dataset_version.lstrip("_")
+        return f"breast_seg_{suffix}_yolo26m" if suffix else "breast_seg_yolo26m"
+
+    @property
     def weights_path(self) -> Path:
-        return self.project_root / "runs" / "breast_seg_yolo26m" / "weights" / "best.pt"
+        """Best checkpoint of the run matching `dataset_version`.
+
+        Kept in sync with `pipeline/orchestrator.py`, which loads the same
+        weights for the compare pipeline. Before, this property still pointed
+        at the v1 run while the orchestrator had moved to v4.
+        """
+        return self.runs_dir / self.run_name / "weights" / "best.pt"
 
     @property
     def test_images_dir(self) -> Path:
@@ -99,7 +125,6 @@ class Config:
     batch_size: int = field(default_factory=lambda: _env_int("BREAST_SEG_BATCH", 8))
     patience: int = field(default_factory=lambda: _env_int("BREAST_SEG_PATIENCE", 15))
     workers: int = field(default_factory=_default_workers)
-    run_name: str = "breast_seg_yolo26m"
     # AMP (FP16): some Windows laptops / cuDNN builds raise CUDNN_STATUS_EXECUTION_FAILED_CUDART.
     # Disabled by default. To try AMP: set env BREAST_SEG_AMP=1 or force True below.
     use_amp: bool = field(

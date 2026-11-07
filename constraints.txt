@@ -1,0 +1,19 @@
+# Library versions the measurements were validated with (preprocessing byte-identical to the reference pipeline,
+# app = engine parity on real studies). OpenCV, NumPy and Ultralytics releases change the NLM / CLAHE output and the
+# model post-processing enough to move ΔD by a few tenths of a millimetre, so the Docker image and the desktop
+# build install with   pip install -c constraints.txt ...
+torch==2.4.1
+torchvision==0.19.1
+ultralytics==8.4.50
+opencv-python==4.10.0.84
+opencv-python-headless==4.10.0.84
+numpy==1.24.4
+PyWavelets==1.4.1
+pydicom==2.4.4
+Pillow==10.2.0
+scipy==1.10.1
+pandas==2.0.3
+matplotlib==3.7.5
+pylibjpeg==2.0.1
+pylibjpeg-libjpeg==2.2.0
+pylibjpeg-openjpeg==2.3.0

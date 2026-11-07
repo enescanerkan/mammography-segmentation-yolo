@@ -1,0 +1,15 @@
+.git
+.github
+**/__pycache__
+*.pyc
+weights/
+data/
+runs/
+datasets/
+results/
+tools/
+tests/
+docs/
+assets/
+configs/app.yaml
+configs/paths.yaml

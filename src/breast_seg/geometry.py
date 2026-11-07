@@ -2,6 +2,10 @@
 
 This module has NO side effects — no file I/O, no drawing.
 It operates solely on numpy arrays and returns data structures.
+
+It is the single source of truth for positioning geometry: the mask route (pectoral line fitted to the
+segmentation, nipple centroid, CC depth) and the landmark route (perpendicular distance to the line through two
+pose keypoints, nipple-to-chest-wall distance in the padded model frame) both live here.
 """
 
 from dataclasses import dataclass
@@ -125,7 +129,7 @@ def fit_pectoral_line(
 
     # Ensure points are ordered top to bottom by y-coordinate
     edge_points.sort(key=lambda p: p[1])
-    
+
     # Point A: Absolute topmost pixel of the pectoral muscle edge
     pt_top = edge_points[0]
     # Point B: Absolute bottommost pixel of the pectoral muscle edge
@@ -136,9 +140,9 @@ def fit_pectoral_line(
     pectoral_height = pt_bot[1] - pt_top[1]
     mid_y = (pt_top[1] + pt_bot[1]) / 2.0
     threshold = pectoral_height * 0.05  # Middle 10% bounds: +/- 5%
-    
+
     middle_points = [p for p in edge_points if abs(p[1] - mid_y) <= threshold]
-    
+
     # Fallback to all points if the muscle is extremely short/small
     if not middle_points:
         middle_points = edge_points
@@ -327,3 +331,55 @@ def compute_cc_depth(
         distance_px=float(distance),
         breast_side=breast_side,
     )
+
+
+# ── Landmark route: pose keypoints in the padded model frame ──
+
+
+def perpendicular_distance(
+    p1: np.ndarray,
+    p2: np.ndarray,
+    point: np.ndarray,
+) -> Tuple[float, np.ndarray]:
+    """Distance from ``point`` to the infinite line through ``p1``-``p2``, plus the foot of the perpendicular.
+
+    This is the landmark-route PNL: the pose model places ``pectoral_top`` and ``pectoral_bottom`` and the
+    nipple, and the PNL is the perpendicular from the nipple to the line through the two pectoral points. Unlike
+    :func:`compute_pnl` the foot is not clamped to the segment (the keypoints do not span the whole muscle).
+
+    Args:
+        p1: (x, y) first point on the line.
+        p2: (x, y) second point on the line.
+        point: (x, y) the point to measure from.
+
+    Returns:
+        (distance, foot) with ``foot`` as a float64 (x, y) array. A degenerate line (``p1 == p2``) returns the
+        distance to ``p1`` and ``p1`` itself.
+    """
+    line = np.asarray(p2, float) - np.asarray(p1, float)
+    vec = np.asarray(point, float) - np.asarray(p1, float)
+    length = np.linalg.norm(line)
+    if length == 0:
+        return float(np.linalg.norm(vec)), np.asarray(p1, float)
+    unit = line / length
+    projection = np.dot(vec, unit) * unit
+    return float(np.linalg.norm(vec - projection)), np.asarray(p1, float) + projection
+
+
+def cc_chestwall_distance(
+    nipple: np.ndarray,
+    chest_side: str,
+    frame_size: int = 640,
+) -> Tuple[float, np.ndarray]:
+    """Nipple-to-chest-wall distance on a CC view, in the padded ``frame_size`` square model frame.
+
+    The preprocessing pads the crop away from the chest wall, so the chest wall is the image edge on
+    ``chest_side`` ('L' = left edge of the pixel data, anything else = right edge). ``chest_side`` is the side of
+    the *pixel data* (see :func:`breast_seg.imaging.chest_wall_side`), not ImageLaterality.
+
+    Returns:
+        (distance, edge_point) where ``edge_point`` is the (x, y) point on the chest-wall edge in the nipple's row.
+    """
+    if chest_side == "L":
+        return float(nipple[0]), np.array([0.0, nipple[1]])
+    return float(frame_size - nipple[0]), np.array([float(frame_size), nipple[1]])

@@ -1,7 +1,6 @@
 """MLO/CC analysis pipeline — orchestrates mask extraction and geometric computations."""
 
 from dataclasses import dataclass
-from pathlib import Path
 from typing import List, Optional
 
 import numpy as np

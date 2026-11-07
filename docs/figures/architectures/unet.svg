@@ -1,0 +1,91 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1120" height="625" viewBox="0 0 1120 625" font-family="Inter, 'Segoe UI', -apple-system, Helvetica, Arial, sans-serif">
+<defs>
+<marker id="ah-a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#6B7488"/></marker>
+<marker id="ah-s" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#0E7C7B"/></marker>
+<marker id="ah-io" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#8A93A6"/></marker>
+<marker id="ah-enc" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#2A3B66"/></marker>
+<marker id="ah-dec" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#0E7C7B"/></marker>
+<marker id="ah-head" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#B9771A"/></marker>
+<marker id="ah-attn" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#6B4FA0"/></marker>
+<marker id="ah-cond" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#B03A2E"/></marker>
+<marker id="ah-op" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#6B7488"/></marker>
+<marker id="ah-frozen" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#8A93A6"/></marker>
+</defs>
+<rect width="100%" height="100%" rx="10" fill="#FFFFFF"/>
+<text x="24.0" y="34.0" font-size="19" text-anchor="start" fill="#14213D" font-weight="600">Semantic baseline · U-Net</text>
+<text x="24.0" y="56.0" font-size="12.5" text-anchor="start" fill="#5B6478">1 × 640 × 640 canvas  →  4 × 640 × 640 class logits · 31.0 M parameters</text>
+<rect x="20" y="146" width="356" height="296" rx="9" fill="#F6F7F9" stroke="#E3E6EC"/>
+<text x="32.0" y="165.0" font-size="10.5" text-anchor="start" fill="#5B6478" font-weight="600">ENCODER</text>
+<rect x="744" y="146" width="356" height="296" rx="9" fill="#F6F7F9" stroke="#E3E6EC"/>
+<text x="756.0" y="165.0" font-size="10.5" text-anchor="start" fill="#5B6478" font-weight="600">DECODER</text>
+<rect x="40" y="84" width="250" height="44" rx="6" fill="#F3F1EC" stroke="#8A93A6" stroke-width="1.2"/>
+<text x="50.0" y="103.0" font-size="12.5" text-anchor="start" fill="#14213D" font-weight="600">Input</text>
+<text x="50.0" y="117.5" font-size="11" text-anchor="start" fill="#5B6478" font-family="'JetBrains Mono', 'SFMono-Regular', Consolas, 'Liberation Mono', monospace">1 × 640 × 640 (grey, 0–1)</text>
+<rect x="40" y="178" width="250" height="46" rx="6" fill="#E7ECF5" stroke="#2A3B66" stroke-width="1.2"/>
+<text x="50.0" y="198.0" font-size="12.5" text-anchor="start" fill="#14213D" font-weight="600">DoubleConv</text>
+<text x="50.0" y="212.5" font-size="11" text-anchor="start" fill="#5B6478" font-family="'JetBrains Mono', 'SFMono-Regular', Consolas, 'Liberation Mono', monospace">64 × 640 × 640</text>
+<rect x="62" y="246" width="250" height="46" rx="6" fill="#E7ECF5" stroke="#2A3B66" stroke-width="1.2"/>
+<text x="72.0" y="266.0" font-size="12.5" text-anchor="start" fill="#14213D" font-weight="600">DoubleConv</text>
+<text x="72.0" y="280.5" font-size="11" text-anchor="start" fill="#5B6478" font-family="'JetBrains Mono', 'SFMono-Regular', Consolas, 'Liberation Mono', monospace">128 × 320 × 320</text>
+<rect x="84" y="314" width="250" height="46" rx="6" fill="#E7ECF5" stroke="#2A3B66" stroke-width="1.2"/>
+<text x="94.0" y="334.0" font-size="12.5" text-anchor="start" fill="#14213D" font-weight="600">DoubleConv</text>
+<text x="94.0" y="348.5" font-size="11" text-anchor="start" fill="#5B6478" font-family="'JetBrains Mono', 'SFMono-Regular', Consolas, 'Liberation Mono', monospace">256 × 160 × 160</text>
+<rect x="106" y="382" width="250" height="46" rx="6" fill="#E7ECF5" stroke="#2A3B66" stroke-width="1.2"/>
+<text x="116.0" y="402.0" font-size="12.5" text-anchor="start" fill="#14213D" font-weight="600">DoubleConv</text>
+<text x="116.0" y="416.5" font-size="11" text-anchor="start" fill="#5B6478" font-family="'JetBrains Mono', 'SFMono-Regular', Consolas, 'Liberation Mono', monospace">512 × 80 × 80</text>
+<rect x="400.0" y="460" width="320" height="46" rx="6" fill="#E7ECF5" stroke="#2A3B66" stroke-width="1.2"/>
+<text x="410.0" y="480.0" font-size="12.5" text-anchor="start" fill="#14213D" font-weight="600">DoubleConv (bottleneck)</text>
+<text x="410.0" y="494.5" font-size="11" text-anchor="start" fill="#5B6478" font-family="'JetBrains Mono', 'SFMono-Regular', Consolas, 'Liberation Mono', monospace">1024 × 40 × 40</text>
+<rect x="830" y="382" width="250" height="46" rx="6" fill="#E1F0EF" stroke="#0E7C7B" stroke-width="1.2"/>
+<text x="840.0" y="402.0" font-size="12.5" text-anchor="start" fill="#14213D" font-weight="600">up-conv, concat, DoubleConv</text>
+<text x="840.0" y="416.5" font-size="11" text-anchor="start" fill="#5B6478" font-family="'JetBrains Mono', 'SFMono-Regular', Consolas, 'Liberation Mono', monospace">512 × 80 × 80</text>
+<rect x="808" y="314" width="250" height="46" rx="6" fill="#E1F0EF" stroke="#0E7C7B" stroke-width="1.2"/>
+<text x="818.0" y="334.0" font-size="12.5" text-anchor="start" fill="#14213D" font-weight="600">up-conv, concat, DoubleConv</text>
+<text x="818.0" y="348.5" font-size="11" text-anchor="start" fill="#5B6478" font-family="'JetBrains Mono', 'SFMono-Regular', Consolas, 'Liberation Mono', monospace">256 × 160 × 160</text>
+<rect x="786" y="246" width="250" height="46" rx="6" fill="#E1F0EF" stroke="#0E7C7B" stroke-width="1.2"/>
+<text x="796.0" y="266.0" font-size="12.5" text-anchor="start" fill="#14213D" font-weight="600">up-conv, concat, DoubleConv</text>
+<text x="796.0" y="280.5" font-size="11" text-anchor="start" fill="#5B6478" font-family="'JetBrains Mono', 'SFMono-Regular', Consolas, 'Liberation Mono', monospace">128 × 320 × 320</text>
+<rect x="764" y="178" width="250" height="46" rx="6" fill="#E1F0EF" stroke="#0E7C7B" stroke-width="1.2"/>
+<text x="774.0" y="198.0" font-size="12.5" text-anchor="start" fill="#14213D" font-weight="600">up-conv, concat, DoubleConv</text>
+<text x="774.0" y="212.5" font-size="11" text-anchor="start" fill="#5B6478" font-family="'JetBrains Mono', 'SFMono-Regular', Consolas, 'Liberation Mono', monospace">64 × 640 × 640</text>
+<rect x="764" y="84" width="250" height="44" rx="6" fill="#F8EDDB" stroke="#B9771A" stroke-width="1.2"/>
+<text x="774.0" y="103.0" font-size="12.5" text-anchor="start" fill="#14213D" font-weight="600">1×1 conv</text>
+<text x="774.0" y="117.5" font-size="11" text-anchor="start" fill="#5B6478" font-family="'JetBrains Mono', 'SFMono-Regular', Consolas, 'Liberation Mono', monospace">4 × 640 × 640</text>
+<path d="M165.0,128.0 L165.0,178.0" fill="none" stroke="#6B7488" stroke-width="1.4" marker-end="url(#ah-a)"/>
+<path d="M70.0,224.0 L70.0,246.0" fill="none" stroke="#6B7488" stroke-width="1.4" marker-end="url(#ah-a)"/>
+<text x="78.0" y="239.0" font-size="10.5" text-anchor="start" fill="#5B6478">max-pool 2×2</text>
+<path d="M92.0,292.0 L92.0,314.0" fill="none" stroke="#6B7488" stroke-width="1.4" marker-end="url(#ah-a)"/>
+<text x="100.0" y="307.0" font-size="10.5" text-anchor="start" fill="#5B6478">max-pool 2×2</text>
+<path d="M114.0,360.0 L114.0,382.0" fill="none" stroke="#6B7488" stroke-width="1.4" marker-end="url(#ah-a)"/>
+<text x="122.0" y="375.0" font-size="10.5" text-anchor="start" fill="#5B6478">max-pool 2×2</text>
+<path d="M166.0,428.0 L166.0,483.0 L400.0,483.0" fill="none" stroke="#6B7488" stroke-width="1.4" marker-end="url(#ah-a)"/>
+<path d="M720.0,483.0 L1020.0,483.0 L1020.0,428.0" fill="none" stroke="#6B7488" stroke-width="1.4" marker-end="url(#ah-a)"/>
+<path d="M1050.0,382.0 L1050.0,360.0" fill="none" stroke="#6B7488" stroke-width="1.4" marker-end="url(#ah-a)"/>
+<text x="1042.0" y="375.0" font-size="10.5" text-anchor="end" fill="#5B6478">up-conv 2×2</text>
+<path d="M1028.0,314.0 L1028.0,292.0" fill="none" stroke="#6B7488" stroke-width="1.4" marker-end="url(#ah-a)"/>
+<text x="1020.0" y="307.0" font-size="10.5" text-anchor="end" fill="#5B6478">up-conv 2×2</text>
+<path d="M1006.0,246.0 L1006.0,224.0" fill="none" stroke="#6B7488" stroke-width="1.4" marker-end="url(#ah-a)"/>
+<text x="998.0" y="239.0" font-size="10.5" text-anchor="end" fill="#5B6478">up-conv 2×2</text>
+<path d="M290.0,201.0 L764.0,201.0" fill="none" stroke="#0E7C7B" stroke-width="1.4" stroke-dasharray="5 4" marker-end="url(#ah-s)"/>
+<text x="527.0" y="196.0" font-size="10.5" text-anchor="middle" fill="#5B6478">skip (concat)</text>
+<path d="M312.0,269.0 L786.0,269.0" fill="none" stroke="#0E7C7B" stroke-width="1.4" stroke-dasharray="5 4" marker-end="url(#ah-s)"/>
+<text x="549.0" y="264.0" font-size="10.5" text-anchor="middle" fill="#5B6478">skip (concat)</text>
+<path d="M334.0,337.0 L808.0,337.0" fill="none" stroke="#0E7C7B" stroke-width="1.4" stroke-dasharray="5 4" marker-end="url(#ah-s)"/>
+<text x="571.0" y="332.0" font-size="10.5" text-anchor="middle" fill="#5B6478">skip (concat)</text>
+<path d="M356.0,405.0 L830.0,405.0" fill="none" stroke="#0E7C7B" stroke-width="1.4" stroke-dasharray="5 4" marker-end="url(#ah-s)"/>
+<text x="593.0" y="400.0" font-size="10.5" text-anchor="middle" fill="#5B6478">skip (concat)</text>
+<path d="M889.0,178.0 L889.0,128.0" fill="none" stroke="#6B7488" stroke-width="1.4" marker-end="url(#ah-a)"/>
+<text x="28.0" y="540.0" font-size="11.5" text-anchor="start" fill="#5B6478">Plain U-Net (Ronneberger 2015), trained from scratch: DoubleConv = (3×3 conv, BatchNorm, ReLU) ×2; 2×2 max-pool down, 2×2 transposed convolution up,</text>
+<text x="28.0" y="557.0" font-size="11.5" text-anchor="start" fill="#5B6478">skip features concatenated before each decoder DoubleConv. Input: the single-channel canvas scaled to [0, 1]. Output: 4-class logits (background, pectoral,</text>
+<text x="28.0" y="574.0" font-size="11.5" text-anchor="start" fill="#5B6478">breast tissue, nipple). Parameters: 31.04 M. The reference baseline without attention, residual blocks or pre-training.</text>
+<rect x="28" y="591" width="14" height="12" rx="3" fill="#F3F1EC" stroke="#8A93A6"/>
+<text x="48.0" y="601.0" font-size="11" text-anchor="start" fill="#5B6478">input / output</text>
+<rect x="159.60000000000002" y="591" width="14" height="12" rx="3" fill="#E7ECF5" stroke="#2A3B66"/>
+<text x="179.6" y="601.0" font-size="11" text-anchor="start" fill="#5B6478">encoder / backbone</text>
+<rect x="316.8" y="591" width="14" height="12" rx="3" fill="#E1F0EF" stroke="#0E7C7B"/>
+<text x="336.8" y="601.0" font-size="11" text-anchor="start" fill="#5B6478">decoder / neck</text>
+<rect x="448.40000000000003" y="591" width="14" height="12" rx="3" fill="#F8EDDB" stroke="#B9771A"/>
+<text x="468.4" y="601.0" font-size="11" text-anchor="start" fill="#5B6478">head</text>
+<path d="M516.0,597 L542.0,597" stroke="#0E7C7B" stroke-width="1.4" stroke-dasharray="5 4"/>
+<text x="548.0" y="601.0" font-size="11" text-anchor="start" fill="#5B6478">skip connection</text>
+</svg>

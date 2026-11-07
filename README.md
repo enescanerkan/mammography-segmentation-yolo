@@ -35,7 +35,8 @@ distances and the positioning criteria.</sub>
 | **Evaluation** | Dice / IoU, landmark and distance errors in mm, the PNL decision rule, paired tests and bootstrap intervals, out-of-fold merging. | `breast_seg.evaluation` · [docs/EVALUATION.md](docs/EVALUATION.md) |
 | **Annotation toolkit** | PyQt5 desktop app: MedSAM2 box / point prompting, manual polygon labelling with an optional detector, and a landmark-based positioning check. | `tools/annotation` · [README](tools/annotation/README.md) |
 
-Every model, its training recipe and its expected weight file are listed in [docs/MODELS.md](docs/MODELS.md).
+Every model with its layer architecture is shown under [Models](#models); training recipes and expected weight files
+are listed in [docs/MODELS.md](docs/MODELS.md).
 
 ## The PNL rule in one paragraph
 
@@ -114,6 +115,97 @@ pixels, meta = read_dicom(open("L-MLO.dcm", "rb").read(), "L-MLO.dcm")
 result = engine.analyse_landmarks(pixels, meta)   # nipple, pectoral line, masks as polygons, in original pixels
 ```
 
+## Models
+
+| Model | Used for | Architecture | Input → output | Parameters |
+|---|---|---|---|---|
+| Landmarks, MLO and CC | PNL landmarks in the app | YOLO26l-pose | wavelet640 canvas → breast box + keypoints (MLO 3, CC 1) | 27.9 M each |
+| YOLO26m-seg v1–v5 (v4 in the app) | pectoral / breast tissue / nipple | YOLO26m-seg | baseline640 canvas → instances with masks | 27.0 M |
+| SegFormer-B3 | semantic segmentation | MiT-B3 transformer + all-MLP decoder | 3 × 640 × 640 → 4 × 640 × 640 | 47.2 M |
+| nnU-Net ResEnc-M | semantic segmentation | residual-encoder U-Net, 2D, 7 stages | 1 × 640 × 640 → 4 × 640 × 640 | 105.9 M |
+| U-Net | semantic baseline | U-Net, 4 levels, from scratch | 1 × 640 × 640 → 4 × 640 × 640 | 31.0 M |
+| AttUNet, landmark / multitask arm | landmarks with and without the segmentation signal | Attention U-Net + CoordConv, two heads | 3 × 640 × 640 → 4 classes + 3 heatmaps | 31.4 M |
+| YOLO26l-seg, YOLOv8m-seg, YOLOv8l-seg | segmentation benchmark backbones | YOLO | canvas → instances with masks | 31.4 M, 27.2 M, 45.9 M |
+| Lesion detector | box proposals in the annotation toolkit | YOLOv8m-detect | canvas → mass / calcification boxes | 25.9 M |
+| MedSAM2 | box-prompted masks in the annotation toolkit | SAM2 Hiera-tiny, fine-tuned | 1024 × 1024 image + box → 256 × 256 mask | 31.4 M used |
+
+Training recipes, datasets and weight files: [docs/MODELS.md](docs/MODELS.md). The figures below are drawn by
+[`tools/figures/architectures.py`](tools/figures/architectures.py) from the models themselves: tensor shapes measured
+with forward hooks on a 640 × 640 input (channels × height × width), parameter counts from the checkpoints and the
+configurations of the trained models.
+
+### Landmark models (YOLO26l-pose, MLO and CC)
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/figures/architectures/yolo26l_pose_dark.svg">
+  <img src="docs/figures/architectures/yolo26l_pose.svg" alt="Landmark models (YOLO26l-pose, MLO and CC): layer architecture">
+</picture>
+
+<sub>Backbone, FPN/PAN neck and the NMS-free pose head; the best 'Breast' box carries the keypoints (MLO: nipple, pectoral top and bottom; CC: nipple).</sub>
+
+### Segmentation model (YOLO26m-seg, dataset generations v1–v5)
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/figures/architectures/yolo26m_seg_dark.svg">
+  <img src="docs/figures/architectures/yolo26m_seg.svg" alt="Segmentation model (YOLO26m-seg, dataset generations v1–v5): layer architecture">
+</picture>
+
+<sub>Same backbone and neck at m scale; the head predicts per-cell boxes, classes and mask coefficients that weight 32 prototype masks.</sub>
+
+### SegFormer-B3
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/figures/architectures/segformer_b3_dark.svg">
+  <img src="docs/figures/architectures/segformer_b3.svg" alt="SegFormer-B3: layer architecture">
+</picture>
+
+<sub>Four-stage hierarchical transformer (efficient self-attention + Mix-FFN) and the all-MLP decoder that fuses every stage at 1/4 resolution.</sub>
+
+### nnU-Net ResEnc-M (2D)
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/figures/architectures/nnunet_resenc_m_dark.svg">
+  <img src="docs/figures/architectures/nnunet_resenc_m.svg" alt="nnU-Net ResEnc-M (2D): layer architecture">
+</picture>
+
+<sub>Seven-stage residual encoder, transposed-convolution decoder with concatenated skips and deep supervision, from the plans of the trained model.</sub>
+
+### U-Net
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/figures/architectures/unet_dark.svg">
+  <img src="docs/figures/architectures/unet.svg" alt="U-Net: layer architecture">
+</picture>
+
+<sub>The plain four-level U-Net trained from scratch, the reference without attention, residual blocks or pre-training.</sub>
+
+### AttUNet (landmark and multitask arms)
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/figures/architectures/attunet_dark.svg">
+  <img src="docs/figures/architectures/attunet.svg" alt="AttUNet (landmark and multitask arms): layer architecture">
+</picture>
+
+<sub>CoordConv input, attention-gated skips and two heads: segmentation and landmark heatmaps read out by a soft-argmax.</sub>
+
+### YOLOv8m (segmentation benchmark, lesion detector)
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/figures/architectures/yolov8m_dark.svg">
+  <img src="docs/figures/architectures/yolov8m.svg" alt="YOLOv8m (segmentation benchmark, lesion detector): layer architecture">
+</picture>
+
+<sub>C2f backbone, decoupled DFL head and NMS; the lesion detector is the same network with a box-only head.</sub>
+
+### MedSAM2 (annotation toolkit)
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/figures/architectures/medsam2_dark.svg">
+  <img src="docs/figures/architectures/medsam2.svg" alt="MedSAM2 (annotation toolkit): layer architecture">
+</picture>
+
+<sub>SAM2 Hiera-tiny image encoder, frozen prompt encoder for the box and the two-way-transformer mask decoder, fine-tuned for box-prompted masks.</sub>
+
 ## Training and evaluation
 
 ```bash
@@ -160,7 +252,8 @@ src/breast_seg/
 configs/                models.yaml, app example, train / datasets / cv configs, paths example
 packaging/              Windows desktop build (PyInstaller spec, launcher) and the weights manifest
 tools/annotation/       PyQt5 annotation toolkit (MedSAM2, manual, positioning)
-docs/                   APP, MODELS, TRAINING, EVALUATION
+docs/                   APP, MODELS, TRAINING, EVALUATION; figures/architectures (model diagrams)
+tools/figures/          the script that draws the architecture figures
 tests/                  unit and API tests (CPU, no weights needed)
 ```
 

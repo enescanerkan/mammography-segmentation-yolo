@@ -1,85 +1,62 @@
-# Python
+# --- patient data, datasets, results: never committed -----------------------
+/data/
+/datasets/
+/seg-dataset*/
+/compare-dataset/
+/label_pool/
+/mlo/
+/runs/
+/outputs/
+/results/
+/weights/
+/workspace/
+/logs/
+*.dcm
+*.npy
+*.npz
+*.nii
+*.nii.gz
+*.csv
+*.png
+*.jpg
+*.jpeg
+*.pptx
+!docs/figures/*.png
+!assets/*.png
+!src/breast_seg/apps/positioning/static/**/*.png
+
+# --- model weights (distributed separately, see docs/MODELS.md) --------------
+*.pt
+*.pth
+*.ckpt
+*.onnx
+*.safetensors
+*.engine
+
+# --- local configuration -----------------------------------------------------
+configs/paths*.yaml
+!configs/paths.example.yaml
+configs/app.yaml
+
+# --- annotation toolkit runtime ----------------------------------------------
+tools/annotation/logs/
+tools/annotation/work_dir*/
+tools/annotation/checkpoints/
+tools/annotation/vendor/
+tools/annotation/data/
+
+# --- python / editors ---------------------------------------------------------
 __pycache__/
 *.py[cod]
-*$py.class
 *.egg-info/
-*.egg
-dist/
 build/
+dist/
 .pytest_cache/
-.mypy_cache/
 .ruff_cache/
+.mypy_cache/
 .venv/
 venv/
 .env
-.env.*
-
-# Veri setleri ve ham DICOM (boyut)
-# seg-dataset* -> v1/v2/v3/v4 sürümlerinin hepsi (bkz. breast_seg/config.py)
-compare-dataset/
-seg-dataset*/
-label_pool/
-# MedSAM2 fine-tune girdisi: MLO görüntülerinin .npy dökümü (~2 GB)
-mlo/
-
-# Karşılaştırma / inference çıktıları (compare_output, _v4, _v4fix, _wavelet ...)
-compare_output*/
-compare_viz_demo/
-predictions/
-analysis_output/
-
-# Yerel yardımcı scriptler + ürettikleri PNG/rapor klasörleri (~315 MB).
-# Bunlar deneysel, tek seferlik iş akışları; repoya girmez.
-tools/
-
-# Sunum / rapor dosyaları (büyük ikili)
-*.pptx
-
-# Eğitim koşuları (runs/weights, cache, grafikler)
-runs/
-
-# Poz ağırlıkları (*.pt paylaşılmaz; README dokümantasyon olarak commit edilebilir)
-pose_weights/*.pt
-pose_weights/*.onnx
-pose_weights/**/*.pt
-
-# Kök dizine indirilen Ultralytics hub checkpoint’leri (ör. yolo26l-pose.pt)
-/*.pt
-
-# Legacy staging directory (positioning app ported into qt_app/positioning)
-eklenecek/
-
-# Runtime logs (rolling files written by qt_app.logging_setup)
-medsam2_experiments/logs/
-medsam2_experiments/*_train_*.log
-
-# MedSAM2 fine-tune çıktıları: her koşu ~800 MB checkpoint
-medsam2_experiments/work_dir*/
-medsam2_experiments/checkpoints/
-
-# Annotation tool YOLO checkpoints (downloaded separately, see docs/)
-medsam2_experiments/qt_app/weights/
-medsam2_experiments/qt_app/positioning/weights/
-
-# Generated label / result artifacts from the GUIs
-medsam2_experiments/qt_app/positioning/results/
-**/labels/*.txt
-
-# IDE
 .vscode/
 .idea/
 *.swp
-*~
-
-# OS
-Thumbs.db
-Desktop.ini
-.DS_Store
-
-# VNC baglanti bilgileri (parola icerir)
-VNC_BAGLANTI.md
-
-# Yerel etiketleme ortami: makineye ozgu mutlak yollar + VNC/Xvfb kurulumu
-# iceriyor. Repoya almak istersen bu iki satiri sil.
-baslat_etiketleme.sh
-ETIKETLEME_DEVAM_*.md

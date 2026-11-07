@@ -1,0 +1,44 @@
+# Mammography Positioning Review — application config.
+# Copy to configs/app.yaml (gitignored) and adjust. Relative paths are resolved against THIS file's directory.
+# Every key is optional; the values below are the defaults.
+
+models:
+  registry: models.yaml          # model registry (ids, recipes, weights relative to the weights root)
+  weights_root: null             # folder holding the weights; null = $BREAST_SEG_WEIGHTS, else the registry's own
+  device: cpu                    # "cpu", or a GPU: "0", "cuda:1"
+
+storage:
+  data_dir: ../data              # renders + label JSON in <data_dir>/studies/<id>/ (uploaded DICOMs are never stored)
+  retention_days: 30             # studies older than this are deleted automatically; 0 = keep forever
+  purge_every_s: 3600            # requests trigger the retention purge at most this often
+
+upload:
+  max_file_mb: 220
+  max_files: 40                  # a folder upload carries more than the four views
+
+display:
+  preview_size: 1280             # display render size; the measurement frame stays 640 whatever this is
+
+rules:
+  threshold_mm: 10.0             # |PNL_MLO - D_CC| at or below this is adequate positioning
+  severe_mm: 15.0                # beyond this the pair is called clearly inadequate
+
+# Criterion bands, {good, acceptable}: a [low, high] range for angles and pressure, otherwise a single limit.
+# Any key left out keeps its default. Focus and exposure were calibrated on one screening cohort; re-measure
+# them for a different vendor mix.
+criteria:
+  pectoral_angle_deg: {good: [20, 35], acceptable: [15, 45]}
+  pectoral_below_nipple_mm: {good: 0, acceptable: -10}   # negative = pectoral ends above the nipple level
+  nipple_profile_mm: {good: 5, acceptable: 10}
+  nipple_centred_mm: {good: 10, acceptable: 20}
+  symmetry_mm: {good: 10, acceptable: 20}
+  clipped_fraction: {good: 0.005, acceptable: 0.02}
+  sharpness: {good: 820, acceptable: 330}                # variance of Laplacian over the tissue
+  compression_kpa: {good: [8, 15], acceptable: [5, 20]}  # estimated, never counted in the score
+
+server:
+  host: 127.0.0.1                # 0.0.0.0 to listen on the network (put it behind an authenticated tunnel)
+  port: 8000
+
+title: Mammography Positioning Review
+language: en                     # interface and report default: en | tr

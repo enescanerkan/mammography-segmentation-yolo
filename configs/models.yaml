@@ -1,0 +1,96 @@
+# Model registry — the one place a weight path, its preprocessing recipe and its output type are declared.
+# Everything else reads from here, so adding or swapping a model never means touching inference code.
+#
+# weights:  always RELATIVE to the weights root. The root is, in order of precedence:
+#             1. models.weights_root of the app config / --weights on the command line
+#             2. the BREAST_SEG_WEIGHTS environment variable
+#             3. weights_root below (relative to this file): the git-ignored weights/ folder of the repository
+#           The same folder and sub-paths serve the annotation toolkit (tools/annotation). See docs/APP.md
+#           ("Weights folder").
+#
+# task:     landmark | segmentation | detection | prompt_segmentation
+# view:     MLO | CC | both
+# recipe:   wavelet640   NLM h=8 -> db4 level-2 detail boost 1.3/1.6 -> CLAHE 2.5/8x8, padded to 640
+#           baseline640  the same crop / pad geometry without the enhancement
+#           raw1024      1024x1024x3 uint8 (MedSAM2)
+#           The two 640 recipes share one coordinate transform, so a point found by one model is directly
+#           comparable with a mask drawn by the other.
+#
+# The engine fills each role with the FIRST ENABLED entry: one landmark model per view, one segmentation model,
+# one (optional) lesion detector. To switch segmentation models, flip the `enabled` flags.
+
+weights_root: ../weights
+
+models:
+  - id: pose_mlo
+    label: YOLO26-pose · MLO
+    task: landmark
+    view: MLO
+    recipe: wavelet640
+    weights: positioning/mlo-yolo26-pose-advanced.pt
+    keypoints: [nipple, pectoral_top, pectoral_bottom]
+    enabled: true
+
+  - id: pose_cc
+    label: YOLO26-pose · CC
+    task: landmark
+    view: CC
+    recipe: wavelet640
+    weights: positioning/cc-yolo26-pose-advanced.pt
+    keypoints: [nipple]
+    enabled: true
+
+  - id: seg_v4
+    label: YOLO26m-seg v4
+    task: segmentation
+    view: both
+    recipe: baseline640
+    weights: segmentation/breast_seg_v4_yolo26m.pt
+    classes: [pectoral, breast-tissue, nipple]
+    conf: 0.25
+    iou: 0.5
+    # The nipple is the class the segmentation model under-scores: at conf 0.25 it is missed on a noticeable
+    # share of images, yet a second pass at 0.02 usually puts a candidate within a few millimetres of the pose
+    # nipple. The low-confidence candidate is taken only when the independent landmark model vouches for it.
+    nipple_rescue:
+      enabled: true
+      conf: 0.02
+      max_mm: 15.0
+    enabled: true
+
+  # Trained on the v5 dataset generation (benchmark run, 300 epochs). Disabled by default: enable it and disable
+  # seg_v4 to serve it — the engine takes the first enabled segmentation entry.
+  - id: seg_v5
+    label: YOLO26m-seg v5
+    task: segmentation
+    view: both
+    recipe: baseline640
+    weights: segmentation/yolo26m_seg_v5.pt
+    classes: [pectoral, breast-tissue, nipple]
+    conf: 0.25
+    iou: 0.5
+    nipple_rescue:
+      enabled: true
+      conf: 0.02
+      max_mm: 15.0
+    enabled: false
+
+  - id: lesion_det
+    label: Mass / Calcification
+    task: detection
+    view: both
+    recipe: baseline640
+    weights: detector/manual_detector.pt
+    classes: [Mass, Calcification]
+    conf: 0.25
+    enabled: true
+
+  # Box-prompted MedSAM2 fine-tune (about 400 MB). Declared so the registry stays the single source of truth;
+  # not served by the review app yet (the box-prompt screen is the next phase).
+  - id: medsam2
+    label: MedSAM2 (fine-tuned)
+    task: prompt_segmentation
+    view: both
+    recipe: raw1024
+    weights: medsam2/medsam_model_best.pth
+    enabled: false

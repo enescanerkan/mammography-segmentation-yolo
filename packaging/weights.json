@@ -1,0 +1,12 @@
+{
+  "release": "weights-v1",
+  "repository": "enescanerkan/mammography-segmentation-yolo",
+  "files": [
+    {"path": "positioning/mlo-yolo26-pose-advanced.pt", "asset": "mlo-yolo26-pose-advanced.pt", "bytes": 56585657,
+     "sha256": "31b0a9a83c752e878daf70b1e16c7335206a42f45507cbab28bb1f583f0c177d"},
+    {"path": "positioning/cc-yolo26-pose-advanced.pt", "asset": "cc-yolo26-pose-advanced.pt", "bytes": 56589497,
+     "sha256": "9d2181265bd7ed719d89b4b8d073f833509961ec401c08304af002114b846ad7"},
+    {"path": "segmentation/breast_seg_v4_yolo26m.pt", "asset": "breast_seg_v4_yolo26m.pt", "bytes": 54502321,
+     "sha256": "44e11093e6ee9a824a165d6a78ab6558a88c54acf0afe38aaa618da35facd8a7"}
+  ]
+}

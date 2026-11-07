@@ -1,0 +1,98 @@
+name: windows app
+
+# Builds the Windows desktop app (packaging/windows) and publishes it:
+#   push to main that touches the app  -> pre-release "dev-build" (same download link, replaced every time)
+#   tag v*                             -> a release of that version
+#   manual run                         -> build artifact only
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+    paths:
+      - "src/**"
+      - "packaging/**"
+      - "configs/models.yaml"
+      - "assets/**"
+      - "pyproject.toml"
+      - "constraints.txt"
+      - ".github/workflows/windows-app.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: windows-app-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  ZIP: MammographyPositioning-windows-x64.zip
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -c constraints.txt ".[app,models,dicom]" "pyinstaller>=6.6,<7" "pywebview>=5.3,<6"
+
+      - name: Weights (release weights-v1, checked against packaging/weights.json)
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release download weights-v1 --dir build/weights-release --clobber
+          python packaging/weights.py build/desktop/weights --from build/weights-release
+
+      - name: Build
+        run: python -m PyInstaller packaging/windows/positioning.spec --distpath dist --workpath build/pyinstaller --noconfirm
+
+      - name: Self-test of the built app
+        shell: pwsh
+        run: |
+          $p = Start-Process -FilePath dist\MammographyPositioning\MammographyPositioning.exe `
+                -ArgumentList "--self-test", "--timeout", "900" -Wait -PassThru
+          Get-Content "$env:LOCALAPPDATA\MammographyPositioning\logs\app.log" -Tail 40
+          if ($p.ExitCode -ne 0) { throw "self-test failed with exit code $($p.ExitCode)" }
+
+      - name: Zip
+        shell: bash
+        run: |
+          cd dist && 7z a -tzip -mx=5 "../$ZIP" MammographyPositioning > /dev/null
+          ls -l "../$ZIP"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: MammographyPositioning-windows-x64
+          path: ${{ env.ZIP }}
+          retention-days: 14
+
+      - name: Publish the dev build
+        if: github.ref == 'refs/heads/main'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete dev-build --cleanup-tag --yes || true
+          gh release create dev-build "$ZIP" --prerelease --target "$GITHUB_SHA" \
+            --title "Windows app – latest build of main" \
+            --notes "Built from ${GITHUB_SHA::7}. Unzip and run MammographyPositioning.exe (CPU only, no installation, no internet). Research software, not a medical device."
+
+      - name: Publish the release
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view "$GITHUB_REF_NAME" > /dev/null 2>&1 || \
+            gh release create "$GITHUB_REF_NAME" --title "$GITHUB_REF_NAME" --generate-notes
+          gh release upload "$GITHUB_REF_NAME" "$ZIP" --clobber

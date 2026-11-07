@@ -1,6 +1,6 @@
 # Positioning review app, CPU only.
 #   docker build -t mammography-segmentation:cpu .
-#   docker run -p 8000:8000 -v /path/to/weights:/weights:ro -v positioning-data:/data mammography-segmentation:cpu
+#   docker run -p 127.0.0.1:8000:8000 -v /path/to/weights:/weights:ro -v positioning-data:/data mammography-segmentation:cpu
 FROM python:3.11-slim
 
 # OpenCV (pulled in by ultralytics) needs libGL / glib even headless.

@@ -26,16 +26,52 @@ def test_serve_flags_become_config_overrides(tmp_path):
     assert args.port == 8123
 
 
-def test_models_reports_missing_weights(tmp_path, capsys):
-    (tmp_path / "pose.pt").write_bytes(b"x")
-    reg = tmp_path / "models.yaml"
-    reg.write_text(
+def _registry(tmp_path, with_detector=False):
+    for rel in ("positioning/mlo.pt", "positioning/cc.pt", "segmentation/seg.pt"):
+        (tmp_path / "w" / rel).parent.mkdir(parents=True, exist_ok=True)
+        (tmp_path / "w" / rel).write_bytes(b"x")
+    (tmp_path / "configs").mkdir(exist_ok=True)
+    (tmp_path / "configs" / "models.yaml").write_text(
         "models:\n"
-        "  - {id: pose_mlo, task: landmark, view: MLO, recipe: wavelet640, weights: pose.pt}\n"
-        "  - {id: seg, task: segmentation, recipe: baseline640, weights: seg.pt}\n"
-        "  - {id: old, task: segmentation, recipe: baseline640, weights: old.pt, enabled: false}\n")
-    code = main(["models", "--weights", str(tmp_path), "--set", f"models.registry={reg}"])
-    out = capsys.readouterr().out
-    assert code == 1 and "MISSING" in out and "pose_mlo" in out
-    (tmp_path / "seg.pt").write_bytes(b"x")
-    assert main(["models", "--weights", str(tmp_path), "--set", f"models.registry={reg}"]) == 0  # disabled ones don't count
+        "  - {id: pose_mlo, task: landmark, view: MLO, recipe: wavelet640, weights: positioning/mlo.pt}\n"
+        "  - {id: pose_cc, task: landmark, view: CC, recipe: wavelet640, weights: positioning/cc.pt}\n"
+        "  - {id: seg, task: segmentation, recipe: baseline640, weights: segmentation/seg.pt}\n"
+        "  - {id: det, task: detection, recipe: baseline640, weights: detector/det.pt}\n")
+    (tmp_path / "configs" / "app.yaml").write_text("models:\n  registry: models.yaml\n  weights_root: ../w\nstorage:\n")
+    return tmp_path / "configs" / "app.yaml"
+
+
+def test_models_resolves_like_serve_and_needs_only_the_required_roles(tmp_path, monkeypatch, capsys):
+    app = _registry(tmp_path)
+    monkeypatch.chdir(tmp_path / "w")  # relative paths must follow the config file, not the working directory
+    assert main(["models", "--config", str(app)]) == 0  # the optional detector is missing, the app can still run
+    assert "MISSING" in capsys.readouterr().out
+    (tmp_path / "w" / "segmentation" / "seg.pt").unlink()
+    assert main(["models", "--config", str(app)]) == 1
+    assert "segmentation: seg has no weights file" in capsys.readouterr().err
+
+
+def test_flags_are_typed_values_and_empty_sections_are_fine(tmp_path):
+    app = _registry(tmp_path)  # `storage:` is an empty section
+    odd = tmp_path / "positioning data #2: copy"
+    args = build_parser().parse_args(["serve", "--config", str(app), "--data-dir", str(odd), "--device", "0",
+                                      "--set", "title=Review: Clinic A"])
+    cfg = _app_config(args)
+    assert Path(cfg.storage.data_dir) == odd.resolve() and cfg.models.device == "0"
+    assert cfg.title == "Review: Clinic A"
+
+
+def test_config_errors_are_one_line(tmp_path, capsys):
+    app = _registry(tmp_path)
+    assert main(["models", "--config", str(app), "--set", "storage.nope=1"]) == 2
+    assert "error:" in capsys.readouterr().err
+
+
+def test_compare_example_config_is_valid():
+    from breast_seg.cli import _section
+    from breast_seg.compare import CompareConfig
+    from breast_seg.config import from_dict
+
+    root = Path(__file__).resolve().parents[1]
+    cfg = from_dict(CompareConfig, _section(str(root / "configs" / "compare.example.yaml"), "compare", ["limit=5"]), "compare")
+    assert cfg.limit == 5 and cfg.wavelet

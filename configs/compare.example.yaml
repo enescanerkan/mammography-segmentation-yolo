@@ -1,0 +1,12 @@
+# breast-seg compare configs/compare.example.yaml   (copy to configs/compare.yaml and adjust; paths may use ${placeholders}
+# from configs/paths.yaml). Ground truth vs pose landmarks vs segmentation on a labelled MLO / CC set.
+compare:
+  compare_root: ${data_root}/compare-dataset      # labels/{mlo,cc}_labels.csv, labels/metadata.csv, test/ images
+  output_dir: ${results_dir}/compare
+  pose_weights_dir: ${weights_dir}/positioning      # mlo-/cc-yolo26-pose-advanced.pt
+  seg_weights: ${weights_dir}/segmentation/breast_seg_v4_yolo26m.pt
+  split: Test
+  image_dir: test
+  limit: 0               # 0 = every pair
+  dicom_viz: true        # draw the DICOM panels when the DICOMs are reachable
+  wavelet: true          # the pose models were trained on wavelet-enhanced images

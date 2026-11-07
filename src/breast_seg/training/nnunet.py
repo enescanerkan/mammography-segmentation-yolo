@@ -56,6 +56,8 @@ def derive_plans(src: Path, dst: Path, plans_name: str, patch_size: Optional[Seq
 
 @register_trainer("nnunet")
 class NnUNetTrainer(Trainer):
+
+    prepares_in_fit = False
     config_class = NnUNetTrainConfig
     config: NnUNetTrainConfig
 

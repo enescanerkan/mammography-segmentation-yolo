@@ -70,17 +70,22 @@ docker compose up --build            # http://localhost:8000
 WEIGHTS_DIR=/path/to/weights docker compose up
 ```
 
-Studies are kept in the `positioning-data` volume. Uploaded DICOM files are never written to disk: only the
+The port is bound to this machine only; `HOST=0.0.0.0 docker compose up` opens it to the network, which needs an
+authenticated proxy in front (the app has no login). Studies are kept in the `positioning-data` volume. Uploaded DICOM files are never written to disk: only the
 display renders and the label JSON are stored, and they expire after 30 days by default.
 
 ### 2b. Python
 
 ```bash
-pip install -e ".[app,models,dicom]"          # CPU is enough; a CUDA build of torch is used when present
+pip install -c constraints.txt -e ".[app,models,dicom]"   # CPU is enough; a CUDA build of torch is used when present
 breast-seg models                             # every model with "weights found" / MISSING
 breast-seg serve --device cpu                 # http://127.0.0.1:8000
 breast-seg serve --host 0.0.0.0 --port 8077 --device 0 --weights /path/to/weights
 ```
+
+`constraints.txt` pins the library versions the measurements were validated with (OpenCV, NumPy and Ultralytics
+releases move ΔD by a few tenths of a millimetre); it applies to Python 3.9–3.11, the versions the Docker image and
+CI use. Without it the package still installs, with the newest libraries.
 
 Settings (threshold, retention, upload limits, criteria bands, interface language) live in an app config; copy
 [`configs/app.example.yaml`](configs/app.example.yaml) and pass it with `--config`, or override single keys with
@@ -106,6 +111,7 @@ cp configs/paths.example.yaml configs/paths.yaml       # machine paths live only
 
 breast-seg build-dataset configs/datasets/seg_v5.yaml
 breast-seg train configs/train/yolo26m_seg_v5.yaml --set device=0
+breast-seg export configs/train/yolo26m_seg_v5.yaml          # copy the selected checkpoint to its release name
 breast-seg cv configs/cv/cv10_yolo26m.yaml             # train, predict out-of-fold, merge, evaluate
 breast-seg evaluate --config configs/cv/cv10_yolo26m.yaml --preds runs/preds --out results --name yolo26m
 ```
@@ -149,7 +155,7 @@ tests/                  unit and API tests (CPU, no weights needed)
 ## Development
 
 ```bash
-pip install -e ".[app,models,dicom,train,dev]"
+pip install -c constraints.txt -e ".[app,models,dicom,train,dev]"
 pytest                                              # package tests
 QT_QPA_PLATFORM=offscreen pytest tools/annotation/tests
 ruff check src tests tools

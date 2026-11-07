@@ -10,7 +10,7 @@
 #     positioning.*_weights): relative paths resolve against weights_root.
 #   * Each key can be overridden by an environment variable (shown on the right).
 
-weights_root: weights                                   # $ANNOTATION_WEIGHTS_ROOT
+weights_root: ../../weights                             # $ANNOTATION_WEIGHTS_ROOT / $BREAST_SEG_WEIGHTS
 logs_dir: logs                                          # $ANNOTATION_LOGS_DIR
 
 medsam2:                                                # SAM Label mode

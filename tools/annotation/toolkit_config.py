@@ -38,7 +38,7 @@ TOOLKIT_ROOT = Path(__file__).resolve().parent
 LOCAL_CONFIG_NAME = "annotation.yaml"
 
 DEFAULTS: Dict[str, Any] = {
-    "weights_root": "weights",
+    "weights_root": "../../weights",  # the repository weights/ folder, shared with breast_seg
     "logs_dir": "logs",
     "medsam2": {
         "repo": "vendor/MedSAM",
@@ -59,7 +59,7 @@ DEFAULTS: Dict[str, Any] = {
 
 # dotted key -> environment variable(s); the first one that is set wins.
 ENV_VARS: Dict[str, tuple] = {
-    "weights_root": ("ANNOTATION_WEIGHTS_ROOT",),
+    "weights_root": ("ANNOTATION_WEIGHTS_ROOT", "BREAST_SEG_WEIGHTS"),
     "logs_dir": ("ANNOTATION_LOGS_DIR",),
     "medsam2.repo": ("MEDSAM2_REPO",),
     "medsam2.model_cfg": ("SAM2_MODEL_CFG",),

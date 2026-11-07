@@ -123,7 +123,7 @@ The SAM2 base checkpoint is Meta's public `sam2_hiera_tiny.pt`
 (`https://dl.fbaipublicfiles.com/segment_anything_2/072824/sam2_hiera_tiny.pt`).
 
 **The MedSAM2 checkpoint is explicit.** The app loads exactly the file set as
-`medsam2.checkpoint` (default `weights/medsam2/medsam_model_best.pth`, or
+`medsam2.checkpoint` (default `<repo>/weights/medsam2/medsam_model_best.pth`, or
 `$MEDSAM2_CHECKPOINT`). It does not scan training folders for the newest run; after a new
 fine-tune, point the key at the run you want.
 
@@ -136,7 +136,7 @@ else `tools/annotation/annotation.yaml` if present (git-ignored; start from
 
 | Key | Default | Environment variable |
 |-----|---------|----------------------|
-| `weights_root` | `weights` | `ANNOTATION_WEIGHTS_ROOT` |
+| `weights_root` | `../../weights` (the repository `weights/` folder) | `ANNOTATION_WEIGHTS_ROOT`, then `BREAST_SEG_WEIGHTS` |
 | `medsam2.repo` | `vendor/MedSAM` | `MEDSAM2_REPO` |
 | `medsam2.model_cfg` | `sam2_hiera_t.yaml` | `SAM2_MODEL_CFG` |
 | `medsam2.sam2_base` | `medsam2/sam2_hiera_tiny.pt` | `MEDSAM2_SAM2_BASE` |

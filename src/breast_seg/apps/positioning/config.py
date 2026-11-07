@@ -139,11 +139,31 @@ def _section(cls: Any, data: Any) -> Any:
     return cls(**data)
 
 
+def _parse_value(value: str) -> Any:
+    """A ``--set`` value as YAML (numbers, booleans, ``{...}`` / ``[...]``), but never at the cost of the text.
+
+    A plain string that YAML would cut at `` #`` or turn into a mapping at ``: `` (a folder name, a title) is kept
+    verbatim; quote it, or write ``{...}``, when a mapping is really meant.
+    """
+    text = value.strip()
+    try:
+        parsed = yaml.safe_load(text) if text else ""
+    except yaml.YAMLError:
+        return text
+    if isinstance(parsed, (dict, list)) and not text.startswith(("{", "[")):
+        return text
+    if isinstance(parsed, str) and parsed != text and not text.startswith(("'", '"')):
+        return text
+    return parsed
+
+
 def _set(data: Dict[str, Any], dotted: str, value: str) -> None:
     *head, last = dotted.split(".")
     for part in head:
-        data = data.setdefault(part, {})
-    data[last] = yaml.safe_load(value)
+        if not isinstance(data.get(part), dict):  # missing, or an empty `section:` (None)
+            data[part] = {}
+        data = data[part]
+    data[last] = _parse_value(value)
 
 
 def app_config_from_dict(data: Optional[Dict[str, Any]], base_dir: Optional[Union[str, Path]] = None) -> AppConfig:

@@ -22,7 +22,7 @@ scipy>=1.10
 pydicom>=2.3
 pylibjpeg>=2.0
 pylibjpeg-libjpeg>=2.1
-pylibjpeg-openjpeg>=2.4
+pylibjpeg-openjpeg>=2.1
 
 # Models: Manual-mode box detector, Positioning pose models, MedSAM2
 torch>=2.1

@@ -55,6 +55,8 @@ class Trainer(ABC):
 
     family: ClassVar[str] = ""
     config_class: ClassVar[Type[BaseTrainConfig]] = BaseTrainConfig
+    #: False when fit() expects prepare() to have run (nnU-Net: cross-validation prepares the shared dataset once).
+    prepares_in_fit: ClassVar[bool] = True
 
     def __init__(self, config: BaseTrainConfig, paths: Optional[PathsConfig] = None):
         if not isinstance(config, self.config_class):

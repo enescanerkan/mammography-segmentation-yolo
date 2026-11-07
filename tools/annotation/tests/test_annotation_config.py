@@ -15,11 +15,12 @@ def test_defaults_are_relative_to_the_toolkit():
     cfg = load_config(environ={})  # no $ANNOTATION_CONFIG -> defaults (unless a local annotation.yaml exists)
     if cfg.source is not None:  # a developer's local annotation.yaml would be picked up
         pytest.skip("local annotation.yaml present")
-    assert cfg.weights_root == TOOLKIT_ROOT / "weights"
+    weights = (TOOLKIT_ROOT / "../../weights").resolve()  # the repository weights/ folder
+    assert cfg.weights_root == weights
     assert cfg.medsam2_repo == TOOLKIT_ROOT / "vendor" / "MedSAM"
-    assert cfg.medsam2_checkpoint == TOOLKIT_ROOT / "weights" / "medsam2" / "medsam_model_best.pth"
-    assert cfg.sam2_base_weights == TOOLKIT_ROOT / "weights" / "medsam2" / "sam2_hiera_tiny.pt"
-    assert cfg.detector_weights == TOOLKIT_ROOT / "weights" / "detector" / "manual_detector.pt"
+    assert cfg.medsam2_checkpoint == weights / "medsam2" / "medsam_model_best.pth"
+    assert cfg.sam2_base_weights == weights / "medsam2" / "sam2_hiera_tiny.pt"
+    assert cfg.detector_weights == weights / "detector" / "manual_detector.pt"
     assert cfg.positioning_mlo_weights.name == "mlo-yolo26-pose-advanced.pt"
     assert cfg.device == "auto"
 

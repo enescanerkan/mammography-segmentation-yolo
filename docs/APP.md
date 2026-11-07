@@ -49,6 +49,39 @@ done). A model that fails to load is reported there, never raised — the servic
 The server binds to `127.0.0.1` by default. Expose it only behind an authenticated tunnel or reverse proxy; real
 patient data should never travel over a public URL.
 
+## Windows desktop app
+
+`packaging/windows` turns the app into a Windows program that needs no Python, no server and no internet. GitHub
+Actions (`.github/workflows/windows-app.yml`) builds it on every push to `main` that touches the app and publishes
+the zip as the pre-release [`dev-build`](https://github.com/enescanerkan/mammography-segmentation-yolo/releases/tag/dev-build)
+(same link every time); a `v*` tag publishes a release of that version. Each build starts the finished executable
+with `--self-test` (models loaded, DICOM decoders present, a synthetic study decoded plain and as JPEG 2000 and
+analysed) before anything is published.
+
+* **Running it.** Unzip `MammographyPositioning-windows-x64.zip` anywhere and start `MammographyPositioning.exe`.
+  The app runs on `127.0.0.1` (port 8765, or a free one) inside the process and is shown in a native window
+  (Microsoft Edge WebView2, part of Windows 10 / 11). Without WebView2 it opens the default browser and shows a
+  small window with a *Quit* button. `MammographyPositioning.exe --browser` always uses the browser.
+* **What it contains.** Python, the libraries in `constraints.txt` (CPU build of PyTorch), the client, the model
+  registry and the three weights of the `weights-v1` release. Models whose weights are not bundled (lesion
+  detector, MedSAM2) are disabled in the bundled registry.
+* **User files** in `%LOCALAPPDATA%\MammographyPositioning`:
+  * `app.yaml` (optional): any key of `configs/app.example.yaml`, e.g. `language: tr` or
+    `rules: {threshold_mm: 12}`; it overrides the desktop defaults key by key;
+  * `data\`: study renders and label JSON (DICOM files are never written), deleted after `storage.retention_days`;
+  * `logs\app.log`: the server log, the first place to look when something fails.
+* **Building it yourself** (on Windows, Python 3.11):
+
+  ```bat
+  pip install -c constraints.txt ".[app,models,dicom,desktop]" "pyinstaller>=6.6,<7"
+  python packaging\weights.py build\desktop\weights
+  python -m PyInstaller packaging\windows\positioning.spec --distpath dist --workpath build\pyinstaller --noconfirm
+  dist\MammographyPositioning\MammographyPositioning.exe --self-test
+  ```
+
+  The spec also builds on Linux (without the splash screen when Tk is missing), which is how the bundle is tested
+  outside Windows.
+
 ## Configuration (`configs/app.example.yaml`)
 
 Relative paths are resolved against the directory of the config file. Every key is optional.

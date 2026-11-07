@@ -46,19 +46,30 @@ The app measures ΔD twice, from the pose landmarks and from the segmentation ma
 
 ## Quick start
 
+### Windows app (no installation)
+
+Download **`MammographyPositioning-windows-x64.zip`** from the
+[latest build](https://github.com/enescanerkan/mammography-segmentation-yolo/releases/tag/dev-build), unzip it and run
+`MammographyPositioning.exe`. The app opens in its own window, runs on the CPU, needs no internet connection and
+contains the landmark and segmentation weights. It is rebuilt by GitHub Actions on every change to the app; tagged
+versions are kept as separate releases. Details (where studies and settings are stored, building it yourself) in
+[docs/APP.md](docs/APP.md#windows-desktop-app).
+
 ### 1. Weights
 
-Weights are not part of the repository. Put them in a `weights/` folder (git-ignored) with this layout, or point
-`--weights` / `$BREAST_SEG_WEIGHTS` at a folder that has it:
+Weights are not part of the git history. The three the review app needs are published in the
+[`weights-v1` release](https://github.com/enescanerkan/mammography-segmentation-yolo/releases/tag/weights-v1);
+`python packaging/weights.py weights` downloads them into `weights/` and checks their SHA-256. The full layout, which
+`--weights` / `$BREAST_SEG_WEIGHTS` may also point at:
 
 ```
 weights/
   positioning/mlo-yolo26-pose-advanced.pt     MLO landmarks        (required)
   positioning/cc-yolo26-pose-advanced.pt      CC landmarks         (required)
   segmentation/breast_seg_v4_yolo26m.pt       segmentation         (required)
-  detector/manual_detector.pt                 lesion detector      (optional)
-  medsam2/medsam_model_best.pth               MedSAM2 fine-tune    (annotation toolkit)
-  medsam2/sam2_hiera_tiny.pt                  SAM2 base            (annotation toolkit)
+  detector/manual_detector.pt                 lesion detector      (optional, not published)
+  medsam2/medsam_model_best.pth               MedSAM2 fine-tune    (annotation toolkit, not published)
+  medsam2/sam2_hiera_tiny.pt                  SAM2 base            (annotation toolkit, from Meta's SAM2 release)
 ```
 
 The annotation toolkit reads the same folder, so one copy serves both.
@@ -147,6 +158,7 @@ src/breast_seg/
   registry.py           model registry
   cli.py                the breast-seg command
 configs/                models.yaml, app example, train / datasets / cv configs, paths example
+packaging/              Windows desktop build (PyInstaller spec, launcher) and the weights manifest
 tools/annotation/       PyQt5 annotation toolkit (MedSAM2, manual, positioning)
 docs/                   APP, MODELS, TRAINING, EVALUATION
 tests/                  unit and API tests (CPU, no weights needed)

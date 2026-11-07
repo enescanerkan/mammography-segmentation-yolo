@@ -23,6 +23,9 @@ with a command line, a review web application, a training framework and the anno
 - **Evaluation library** (`breast_seg.evaluation`, `breast-seg evaluate`): mask metrics, landmark and distance errors,
   the PNL rule with its counting conventions, paired tests and bootstrap intervals.
 - `breast-seg` command line, Docker image (CPU) and compose file, CI (lint, tests, image smoke test).
+- **Windows desktop app** (`packaging/windows`, `breast_seg.apps.desktop`): the review app in a native window, CPU
+  only, weights included; built, self-tested and published by GitHub Actions on every change (`dev-build`) and for
+  every `v*` tag. The review app's weights are published in the `weights-v1` release (`packaging/weights.py`).
 - Documentation: `docs/APP.md`, `docs/MODELS.md`, `docs/TRAINING.md`, `docs/EVALUATION.md`.
 
 ### Changed

@@ -1,0 +1,15 @@
+# docker compose up --build            -> http://localhost:8000
+# WEIGHTS_DIR=/path/to/weights docker compose up
+services:
+  positioning:
+    build: .
+    image: mammography-segmentation:cpu
+    ports:
+      - "${PORT:-8000}:8000"
+    volumes:
+      - ${WEIGHTS_DIR:-./weights}:/weights:ro
+      - positioning-data:/data
+    restart: unless-stopped
+
+volumes:
+  positioning-data:

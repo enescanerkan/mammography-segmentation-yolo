@@ -1,0 +1,10 @@
+# CC landmark model: nipple only.
+base: _yolo_pose_base.yaml
+name: pose_cc_yolo26l
+description: YOLO26l-pose CC nipple on wavelet-enhanced canvases
+data:
+  dataset_dir: ${data_root}/pose_wavelet/CC
+  kpt_shape: [1, 3]
+  keypoint_names: [nipple]
+export:
+  filename: cc-yolo26-pose-advanced.pt

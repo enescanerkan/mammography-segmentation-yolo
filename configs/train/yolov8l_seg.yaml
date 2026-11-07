@@ -1,0 +1,7 @@
+# Benchmark backbone: YOLOv8l-seg with the YOLO26m-seg 300-epoch recipe unchanged (only the backbone differs).
+base: yolo26m_seg_300ep.yaml
+name: yolov8l_seg_300ep
+description: YOLOv8l-seg, v4 data, 300-epoch schedule
+model: yolov8l-seg.pt
+export:
+  filename: yolov8l_seg_300ep.pt

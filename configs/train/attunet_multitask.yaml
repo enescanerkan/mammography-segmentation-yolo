@@ -1,0 +1,7 @@
+# Arm B: the same network and recipe with the segmentation loss added (multitask).
+base: _attunet_base.yaml
+name: attunet_multitask
+description: AttUNet multitask arm (w_seg = 1)
+w_seg: 1.0
+export:
+  filename: attunet_multitask.pt

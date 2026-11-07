@@ -29,8 +29,8 @@ class ResultVisualizer:
     FONT_SCALE = 0.6
     LINE_THICKNESS = 2
 
-    def __init__(self, config: Config):
-        self._config = config
+    def __init__(self, config: Optional[Config] = None):
+        self._config = config or Config()
 
     def draw_analysis(self, result: AnalysisResult) -> np.ndarray:
         """Draw all analysis overlays on the image."""

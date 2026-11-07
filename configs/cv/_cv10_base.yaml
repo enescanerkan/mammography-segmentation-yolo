@@ -1,0 +1,37 @@
+# 10-fold cross-validation on the internal cohort with the folds of an existing pair-level fold table (study-level,
+# stratified), so every model is compared case by case on the same folds.
+#   fold i: test = fold i, validation = fold (i + 1) % 10, train = the other eight folds.
+# Images of the cohort missing from the table are placed in the fold of their study (no leakage through a study);
+# images without labels are predicted in their own test fold only.
+n_folds: 10
+val_offset: 1
+folds:
+  csv: ${cv10_fold_table}
+  format: pairs
+  mlo_column: SOPInstanceUID_mlo
+  cc_column: SOPInstanceUID_cc
+  group_column: StudyInstanceUID
+  fold_column: fold
+  cc_prefix: cc_
+data:
+  yolo_dir: ${data_root}/seg-dataset_v4
+  semantic_dir: ${data_root}/semantic_v4
+  unlabelled_images: ${mlo_label_pool}
+  group_table:
+    csv: ["${mlo_labels}", "${cc_labels}"]
+    key: SOPInstanceUID
+    group: StudyInstanceUID
+    prefixes: ["", cc_]
+work_dir: ${runs_dir}/cv
+predictions_dir: ${predictions_dir}
+results_dir: ${results_dir}
+skip_finished: true
+evaluation:
+  mlo_labels: ${mlo_labels}
+  cc_labels: ${cc_labels}
+  mlo_metadata: ${mlo_metadata}
+  cc_metadata: ${cc_metadata}
+  masks_dir: ${data_root}/semantic_v4
+  pairs: labels
+  min_nipple_px: 30
+  fallback: false

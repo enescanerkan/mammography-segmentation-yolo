@@ -1,0 +1,37 @@
+# Lesion detector used by the annotation toolkit (box proposals): YOLOv8m detect, two classes, 1024 input.
+# Hyper-parameters as stored in the released checkpoint; the training dataset is not part of this repository.
+family: yolo_detect
+name: lesion_yolov8m
+description: YOLOv8m lesion detector (Mass, Calcification)
+seed: 0
+device: "0"
+workers: 8
+model: yolov8m.pt
+data:
+  dataset_dir: ${data_root}/lesions
+  names: [Mass, Calcification]
+hyp:
+  epochs: 100
+  patience: 15
+  batch: 8
+  imgsz: 1024
+  optimizer: auto
+  lr0: 0.01
+  lrf: 0.01
+  amp: true
+  degrees: 0.0
+  translate: 0.1
+  scale: 0.5
+  fliplr: 0.5
+  flipud: 0.0
+  hsv_h: 0.015
+  hsv_s: 0.7
+  hsv_v: 0.4
+  mosaic: 1.0
+  close_mosaic: 10
+  mixup: 0.0
+predict:
+  conf: 0.25
+  imgsz: 1024
+export:
+  filename: manual_detector.pt

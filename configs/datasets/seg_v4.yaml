@@ -1,0 +1,62 @@
+# seg-dataset_v4: hand-annotated MLO polygons + CC pseudo-labels of the v2 model (a subset corrected by hand),
+# split by the label tables' own Split column (Train / Validation / Test, study-consistent) so the test split
+# stays out of every training.
+#   MLO: the listed broken annotations are excluded; clean-up = pectoral largest component + hole fill + close,
+#        breast/pectoral seam added to the breast tissue.
+#   CC : breast and nipple holes filled (no pectoral class). CC files carry the cc_ prefix.
+# Also exported as label maps (SegFormer / U-Net / AttUNet) and as nnU-Net Dataset601 (fold 0 = this split,
+# folds 1-5 = study-level 5-fold CV over train + val).
+name: seg-dataset_v4
+description: VinDr-Mammo MLO + CC, breast / pectoral / nipple polygons, label-table split
+output_dir: ${data_root}/seg-dataset_v4
+class_names: [pectoral, breast-tissue, nipple]
+split_map:
+  csv: ["${mlo_labels}", "${cc_labels}"]
+  key: SOPInstanceUID
+  column: Split
+  values: {Train: train, Validation: val, Test: test}
+groups:
+  - csv: ["${mlo_labels}", "${cc_labels}"]
+    key: SOPInstanceUID
+    group: StudyInstanceUID
+    namespace: study
+sources:
+  - name: mlo
+    type: yolo_dir
+    images: ${mlo_label_pool}
+    labels: ${mlo_label_pool}/labels
+    view: MLO
+    corrections: mlo
+    split: map
+    exclude:
+      - list_file: ${mlo_exclude_list}
+  - name: cc
+    type: yolo_dir
+    images: ${cc_label_pool}
+    labels: ${cc_pseudo_labels}
+    prefix: cc_
+    view: CC
+    corrections: cc
+    split: map
+correction:
+  pectoral_close: 9
+  gap_kernel: 41
+  min_contour_area: 20
+  approx_epsilon: 0.002
+audit:
+  image_shape: [640, 640]
+  unique_pixels: true
+  require_breast: true
+  forbid_cc_pectoral: true
+  leakage: true
+exports:
+  semantic:
+    enabled: true
+    output_dir: ${data_root}/semantic_v4
+  nnunet:
+    enabled: true
+    dataset_id: 601
+    dataset_name: BreastSeg
+    cv_folds: 5
+    cv_seed: 42
+    description: "breast / pectoral / nipple segmentation, 640x640 canvases, study-level split; test held out"

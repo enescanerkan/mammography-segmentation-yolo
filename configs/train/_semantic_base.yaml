@@ -1,0 +1,28 @@
+# Shared input and augmentation of the PyTorch semantic families (SegFormer, U-Net, AttUNet): the same split and
+# 640 canvas as YOLO, the same anatomy-safe geometry (horizontal flip, +-8 degree rotation, 20 % scale, 5 %
+# translation, no vertical flip) and pixel-level brightness / contrast / gamma / CLAHE / noise / blur / sharpen.
+seed: 42
+device: "0"
+workers: 8
+data:
+  dataset_dir: ${data_root}/semantic_v4
+  index: index.csv
+  classes: [background, pectoral, breast-tissue, nipple]
+optim:
+  epochs: 300
+  patience: 50
+  weight_decay: 0.01
+  poly_power: 1.0
+  amp_dtype: bfloat16
+  val_workers: 4
+augment:
+  - {name: HorizontalFlip, p: 0.5}
+  - {name: Affine, rotate: [-8, 8], scale: [0.8, 1.2], translate_percent: [-0.05, 0.05],
+     border_mode: cv2.BORDER_CONSTANT, fill: 0, fill_mask: 0, p: 0.8}
+  - {name: RandomBrightnessContrast, brightness_limit: 0.2, contrast_limit: 0.25, p: 0.4}
+  - {name: RandomGamma, gamma_limit: [80, 120], p: 0.2}
+  - {name: CLAHE, clip_limit: [1, 4], p: 0.25}
+  - {name: GaussNoise, p: 0.2}
+  - {name: OneOf, transforms: [{name: Blur, blur_limit: 3}, {name: MedianBlur, blur_limit: 3}], p: 0.15}
+  - {name: Sharpen, alpha: [0.1, 0.3], p: 0.1}
+flip_tta: true

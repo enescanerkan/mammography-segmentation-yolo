@@ -1,0 +1,11 @@
+# nnU-Net ResEnc-M, the full-image plans of the main nnU-Net dataset transferred unchanged to one CV dataset
+# (all labelled images in imagesTr, one splits_final.json entry per fold, imagesTest_fold<i> per fold).
+# Prediction with checkpoint_final.
+base: _cv10_base.yaml
+name: cv10_nnunet
+train_config: ../train/nnunet_resenc_m.yaml
+overrides:
+  dataset_id: 603
+  dataset_name: BreastSegCV10
+  transfer_plans_from: 601
+  data.description: "10-fold CV of the internal cohort; folds from the pair-level fold table"

@@ -1,136 +1,108 @@
-"""
-SOLID OOP: Visualizer for DICOM and PNG outputs
-"""
+"""Side-by-side DICOM panels of the compare run: reference, pose route and segmentation route, MLO over CC."""
+from __future__ import annotations
+
 from pathlib import Path
-from typing import Optional
+from typing import Any, Dict, Optional
 
 import cv2
 import numpy as np
-import pandas as pd
+
+COLORS = {"gt": (0, 255, 0), "pose": (0, 165, 255), "seg": (255, 0, 255)}
+MASK_COLORS = {0: (90, 90, 200), 1: (50, 200, 80), 2: (50, 60, 255)}
+FONT = cv2.FONT_HERSHEY_SIMPLEX
+
+
+def _pt(p: Any) -> tuple:
+    return int(p[0]), int(p[1])
 
 
 class ResultVisualizer:
-    """Consolidates complex plotting logic for MLO and CC views."""
+    """Draws one PNG per breast pair."""
 
     @staticmethod
-    def _apply_seg_mask(bgr: np.ndarray, masks: Optional[np.ndarray], cls_arr: Optional[np.ndarray], meta: pd.Series) -> np.ndarray:
-        if masks is None or cls_arr is None or len(masks) == 0:
+    def _apply_seg_mask(bgr: np.ndarray, masks: Optional[np.ndarray], classes: Optional[np.ndarray], meta: Any) -> np.ndarray:
+        """Paste 640-canvas instance masks back onto the original image (undo padding, resize to the crop)."""
+        if masks is None or classes is None or len(masks) == 0:
             return bgr
-            
         out = bgr.copy()
         dh, dw = out.shape[:2]
         layer = np.zeros_like(out, dtype=np.float32)
         weight = np.zeros((dh, dw), dtype=np.float32)
-        
-        scale = float(meta["scale"])
         pt, pb = int(float(meta["pad_top"])), int(float(meta["pad_bottom"]))
         pl, pr = int(float(meta["pad_left"])), int(float(meta["pad_right"]))
         cx1, cx2 = int(float(meta["crop_x1"])), int(float(meta["crop_x2"]))
         cy1, cy2 = int(float(meta["crop_y1"])), int(float(meta["crop_y2"]))
-        
-        colors = {0: (90, 90, 200), 1: (50, 200, 80), 2: (50, 60, 255)}
-        
-        for i in range(len(masks)):
-            c = int(cls_arr[i])
-            if c not in colors: continue
-            
-            m640 = masks[i]
+        for m640, c in zip(masks, classes):
+            c = int(c)
+            if c not in MASK_COLORS:
+                continue
             mh, mw = m640.shape
-            m_unpad = m640[pt:mh-pb, pl:mw-pr] if pt < mh-pb and pl < mw-pr else m640
-            
-            orig_crop_w, orig_crop_h = max(1, cx2 - cx1), max(1, cy2 - cy1)
-            m_resized = cv2.resize(m_unpad, (orig_crop_w, orig_crop_h), interpolation=cv2.INTER_NEAREST)
-            bool_m = m_resized > 0.5
-            
-            mask_d = np.zeros((dh, dw), dtype=bool)
-            # Guard: if the paste origin falls outside the destination canvas
-            # (cx1>=dw or cy1>=dh), the crop width/height goes negative and the
-            # broadcast crashes. Clamp to a valid, non-negative region.
-            oy1 = max(0, min(cy1, dh)); ox1 = max(0, min(cx1, dw))
-            dh_crop = max(0, min(bool_m.shape[0], dh - oy1))
-            dw_crop = max(0, min(bool_m.shape[1], dw - ox1))
-            if dh_crop > 0 and dw_crop > 0:
-                mask_d[oy1:oy1+dh_crop, ox1:ox1+dw_crop] = bool_m[:dh_crop, :dw_crop]
-            
-            layer[mask_d] = np.array(colors[c], dtype=np.float32)
-            weight[mask_d] = 1.0
-
-        a = 0.38
-        w3 = weight[..., None]
-        blend = out.astype(np.float32) * (1.0 - a * w3) + layer * (a * w3)
-        return np.clip(blend, 0, 255).astype(np.uint8)
+            unpadded = m640[pt:mh - pb, pl:mw - pr] if pt < mh - pb and pl < mw - pr else m640
+            resized = cv2.resize(unpadded, (max(1, cx2 - cx1), max(1, cy2 - cy1)), interpolation=cv2.INTER_NEAREST) > 0.5
+            oy, ox = max(0, min(cy1, dh)), max(0, min(cx1, dw))
+            h, w = max(0, min(resized.shape[0], dh - oy)), max(0, min(resized.shape[1], dw - ox))
+            if h == 0 or w == 0:
+                continue
+            full = np.zeros((dh, dw), dtype=bool)
+            full[oy:oy + h, ox:ox + w] = resized[:h, :w]
+            layer[full] = np.array(MASK_COLORS[c], dtype=np.float32)
+            weight[full] = 1.0
+        alpha = 0.38 * weight[..., None]
+        return np.clip(out.astype(np.float32) * (1.0 - alpha) + layer * alpha, 0, 255).astype(np.uint8)
 
     @staticmethod
-    def _draw_points_mlo(out: np.ndarray, pts: dict, color: tuple, w: int, r: int):
-        nip, p1, p2, fd = pts.get("nipple"), pts.get("p1"), pts.get("p2"), pts.get("foot")
-        if all(x is not None for x in [nip, p1, p2, fd]):
-            cv2.line(out, (int(p1[0]), int(p1[1])), (int(p2[0]), int(p2[1])), color, w)
-            cv2.circle(out, (int(nip[0]), int(nip[1])), r, color, -1)
-            cv2.line(out, (int(nip[0]), int(nip[1])), (int(fd[0]), int(fd[1])), color, w)
+    def _draw_mlo(img: np.ndarray, pts: Dict[str, Any], color: tuple, w: int, r: int) -> None:
+        nip, p1, p2, foot = pts.get("nipple"), pts.get("p1"), pts.get("p2"), pts.get("foot")
+        if all(x is not None for x in (nip, p1, p2, foot)):
+            cv2.line(img, _pt(p1), _pt(p2), color, w)
+            cv2.circle(img, _pt(nip), r, color, -1)
+            cv2.line(img, _pt(nip), _pt(foot), color, w)
 
     @staticmethod
-    def _draw_points_cc(out: np.ndarray, pts: dict, color: tuple, w: int, r: int):
+    def _draw_cc(img: np.ndarray, pts: Dict[str, Any], color: tuple, w: int, r: int) -> None:
         nip, wall = pts.get("nipple"), pts.get("wall")
         if nip is not None and wall is not None:
-            cv2.circle(out, (int(nip[0]), int(nip[1])), r, color, -1)
-            cv2.line(out, (int(nip[0]), int(nip[1])), (int(wall[0]), int(wall[1])), color, w)
+            cv2.circle(img, _pt(nip), r, color, -1)
+            cv2.line(img, _pt(nip), _pt(wall), color, w)
 
-    def draw_dicom_grid(self, out_path: Path, m_bgr: np.ndarray, c_bgr: np.ndarray, 
-                        m_meta: pd.Series, c_meta: pd.Series,
-                        mlo_res: dict, cc_res: dict, row: pd.Series) -> bool:
-        
+    @staticmethod
+    def _caption(width: int, height: int, title: str, label: str) -> np.ndarray:
+        h = max(80, int(height * 0.065))
+        bar = np.full((h, width, 3), (35, 35, 45), dtype=np.uint8)
+        th = max(2, int(width * 0.003))
+        cv2.putText(bar, title[:80], (16, int(h * 0.45)), FONT, max(0.8, width * 0.0015), (220, 220, 200), th, cv2.LINE_AA)
+        if label:
+            cv2.putText(bar, label[:120], (16, int(h * 0.88)), FONT, max(0.65, width * 0.0011), (170, 200, 255), th, cv2.LINE_AA)
+        return bar
+
+    def draw_dicom_grid(self, out_path: Path, m_bgr: np.ndarray, c_bgr: np.ndarray, m_meta: Any, c_meta: Any,
+                        mlo_res: Dict[str, Dict[str, Any]], cc_res: Dict[str, Dict[str, Any]], row: Any) -> bool:
         mh, mw = m_bgr.shape[:2]
-        if c_bgr.shape[0] != mh:
-            c_bgr = cv2.resize(c_bgr, (int(c_bgr.shape[1] * mh / c_bgr.shape[0]), mh))
-        if c_bgr.shape[1] != mw:
+        if c_bgr.shape[:2] != (mh, mw):
             c_bgr = cv2.resize(c_bgr, (mw, mh))
-
-        panels_mlo, panels_cc = [], []
-        colors = {"gt": (0, 255, 0), "pose": (0, 165, 255), "seg": (255, 0, 255)}
         w, r = max(1, mh // 500), max(2, mh // 500)
-        
-        def cap(l1, l2):
-            h = max(80, int(mh * 0.065))
-            b = np.zeros((h, mw, 3), dtype=np.uint8)
-            b[:] = (35, 35, 45)
-            fs1, fs2, th = max(0.8, mw * 0.0015), max(0.65, mw * 0.0011), max(2, int(mw * 0.003))
-            cv2.putText(b, l1[:80], (16, int(h * 0.45)), cv2.FONT_HERSHEY_SIMPLEX, fs1, (220, 220, 200), th, cv2.LINE_AA)
-            if l2:
-                cv2.putText(b, l2[:120], (16, int(h * 0.88)), cv2.FONT_HERSHEY_SIMPLEX, fs2, (170, 200, 255), th, cv2.LINE_AA)
-            return b
-
-        for mode, color in colors.items():
-            pm = mlo_res.get(mode, {})
-            pc = cc_res.get(mode, {})
-            
-            # MLO
-            m_img = m_bgr.copy()
+        mlo_panels, cc_panels = [], []
+        for mode, color in COLORS.items():
+            pm, pc = mlo_res.get(mode, {}), cc_res.get(mode, {})
+            m_img, c_img = m_bgr.copy(), c_bgr.copy()
             if mode == "seg" and "masks" in pm:
                 m_img = self._apply_seg_mask(m_img, pm["masks"], pm["cls"], m_meta)
-            self._draw_points_mlo(m_img, pm, color, w, r)
-            panels_mlo.append(np.vstack([cap(f"MLO {mode.upper()}", pm.get("label", "")), m_img]))
-            
-            # CC
-            c_img = c_bgr.copy()
             if mode == "seg" and "masks" in pc:
                 c_img = self._apply_seg_mask(c_img, pc["masks"], pc["cls"], c_meta)
-            self._draw_points_cc(c_img, pc, color, w, r)
-            panels_cc.append(np.vstack([cap(f"CC {mode.upper()}", pc.get("label", "")), c_img]))
-
-        mlo_row = np.hstack(panels_mlo)
-        cc_row = np.hstack(panels_cc)
-        
-        # Title
+            self._draw_mlo(m_img, pm, color, w, r)
+            self._draw_cc(c_img, pc, color, w, r)
+            mlo_panels.append(np.vstack([self._caption(mw, mh, f"MLO {mode.upper()}", pm.get("label", "")), m_img]))
+            cc_panels.append(np.vstack([self._caption(mw, mh, f"CC {mode.upper()}", pc.get("label", "")), c_img]))
+        mlo_row, cc_row = np.hstack(mlo_panels), np.hstack(cc_panels)
         th = max(70, int(mh * 0.05))
-        top = np.zeros((th, mlo_row.shape[1], 3), dtype=np.uint8)
-        top[:] = (20, 30, 40)
-        fs, tfw = max(0.9, mw * 0.0018), max(2, int(mw * 0.003))
-        
-        def ef(e): return f"{e:.1f}mm" if e is not None else "N/A"
-        
-        title_lines = f"Kural PNL 10mm  |  GT: {ef(row.get('gt_abs_err'))}  |  Pose: {ef(row.get('pose_abs_err'))}  |  Seg: {ef(row.get('seg_abs_err'))}"
-        cv2.putText(top, title_lines, (16, int(th * 0.65)), cv2.FONT_HERSHEY_SIMPLEX, fs, (200, 220, 255), tfw, cv2.LINE_AA)
-        
-        out_path.parent.mkdir(parents=True, exist_ok=True)
-        cv2.imwrite(str(out_path), np.vstack([top, mlo_row, cc_row]))
-        return True
+        top = np.full((th, mlo_row.shape[1], 3), (20, 30, 40), dtype=np.uint8)
+
+        def fmt(e: Any) -> str:
+            return "N/A" if e is None or (isinstance(e, float) and np.isnan(e)) else f"{e:.1f} mm"
+
+        title = (f"PNL rule 10 mm  |  GT: {fmt(row.get('gt_abs_err'))}  |  Pose: {fmt(row.get('pose_abs_err'))}  |  "
+                 f"Seg: {fmt(row.get('seg_abs_err'))}")
+        cv2.putText(top, title, (16, int(th * 0.65)), FONT, max(0.9, mw * 0.0018), (200, 220, 255), max(2, int(mw * 0.003)),
+                    cv2.LINE_AA)
+        Path(out_path).parent.mkdir(parents=True, exist_ok=True)
+        return bool(cv2.imwrite(str(out_path), np.vstack([top, mlo_row, cc_row])))

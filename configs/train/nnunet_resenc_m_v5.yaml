@@ -1,0 +1,12 @@
+# nnU-Net ResEnc-M on seg-dataset_v5 (fold 0 only = v5 train / v4 val), same plans and trainer as on v4.
+base: nnunet_resenc_m.yaml
+name: nnunet_resenc_m_v5
+description: nnU-Net ResEnc-M, full-image patch, v5 data
+dataset_id: 602
+dataset_name: BreastSegV5
+data:
+  dataset_dir: ${data_root}/semantic_v5
+  cv_folds: 0
+  description: "seg-dataset_v5: v4 plus completed public / external images in train; v4 val / test unchanged"
+export:
+  filename: nnunet_resenc_m_v5_fold0.zip

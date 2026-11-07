@@ -1,0 +1,26 @@
+# nnU-Net v2, residual-encoder M preset (nnUNetPlannerResEncM). Two deliberate deviations, both for a fair
+# comparison with the full-canvas models: the patch is the whole 640x640 canvas (the planner's patch would crop
+# wide breasts; batch size adjusted to it) and vertical mirroring is off (nnUNetTrainerMammo). 300 epochs of
+# nnU-Net's fixed 250 iterations; no early stopping (checkpoint_final is used for prediction).
+family: nnunet
+name: nnunet_resenc_m
+description: nnU-Net ResEnc-M, full-image patch, v4 data
+dataset_id: 601
+dataset_name: BreastSeg
+configuration: "2d"
+fold: 0
+planner: nnUNetPlannerResEncM
+base_plans: nnUNetResEncUNetMPlans
+plans: nnUNetResEncUNetMPlans_fullM
+patch_size: [640, 640]
+batch_size: 12
+trainer: nnUNetTrainerMammo
+num_processes: 8
+checkpoint: checkpoint_final.pth
+data:
+  dataset_dir: ${data_root}/semantic_v4
+  cv_folds: 5
+  cv_seed: 42
+  description: "breast / pectoral / nipple segmentation, 640x640 canvases, study-level split; test held out"
+export:
+  filename: nnunet_resenc_m_fold0.zip

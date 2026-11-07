@@ -1,0 +1,10 @@
+# MLO landmark model: nipple, pectoral_top, pectoral_bottom.
+base: _yolo_pose_base.yaml
+name: pose_mlo_yolo26l
+description: YOLO26l-pose MLO landmarks on wavelet-enhanced canvases
+data:
+  dataset_dir: ${data_root}/pose_wavelet/MLO
+  kpt_shape: [3, 3]
+  keypoint_names: [nipple, pectoral_top, pectoral_bottom]
+export:
+  filename: mlo-yolo26-pose-advanced.pt

@@ -1,0 +1,36 @@
+# YOLO26m-seg v1: the hand-labelled seed set (image-level split with pre-built horizontal flips, so Ultralytics'
+# own flip is off). Kept for provenance; superseded by v4.
+family: yolo_seg
+name: breast_seg_yolo26m
+description: YOLO26m-seg on the v1 seed set (legacy recipe)
+seed: 0
+device: "0"
+workers: 0
+model: yolo26m-seg.pt
+data:
+  dataset_dir: ${data_root}/seg-dataset
+  names: [pectoral, breast-tissue, nipple]
+hyp:
+  epochs: 100
+  patience: 15
+  batch: 8
+  imgsz: 640
+  optimizer: AdamW
+  lr0: 0.001
+  lrf: 0.01
+  warmup_epochs: 3
+  amp: false
+  deterministic: false
+  degrees: 5.0
+  translate: 0.1
+  scale: 0.3
+  fliplr: 0.0
+  flipud: 0.0
+  mosaic: 0.5
+  overlap_mask: true
+  mask_ratio: 4
+  save_period: 10
+  plots: true
+cudnn_benchmark: false
+export:
+  filename: breast_seg_yolo26m.pt

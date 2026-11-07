@@ -1,0 +1,7 @@
+# YOLO26m-seg, 300-epoch benchmark recipe; patience 300 = no early stopping, every fold runs the full schedule
+# (best.pt is still selected on the fold's validation fold).
+base: _cv10_base.yaml
+name: cv10_yolo26m
+train_config: ../train/yolo26m_seg_300ep.yaml
+overrides:
+  hyp.patience: 300

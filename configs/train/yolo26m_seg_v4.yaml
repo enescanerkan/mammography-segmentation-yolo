@@ -1,0 +1,9 @@
+# YOLO26m-seg v4: the published segmentation model. Shared recipe (150 epochs, patience 30) on seg-dataset_v4
+# (study-level split taken from the label tables; the test split is held out of every training).
+base: _yolo_seg_base.yaml
+name: breast_seg_v4_yolo26m
+description: YOLO26m-seg on seg-dataset_v4
+data:
+  dataset_dir: ${data_root}/seg-dataset_v4
+export:
+  filename: breast_seg_v4_yolo26m.pt

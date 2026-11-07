@@ -1,0 +1,444 @@
+<!doctype html>
+<html lang="en" data-bs-theme="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Mammography Positioning Review</title>
+<link rel="icon" type="image/svg+xml" href="/static/assets/icon.svg">
+<script>
+  try { const t = localStorage.getItem("breastseg.theme"); if (t === "dark" || t === "light") document.documentElement.dataset.bsTheme = t; } catch (_) {}
+</script>
+<link rel="stylesheet" href="/static/vendor/tabler/tabler.min.css">
+<link rel="stylesheet" href="/static/theme.css">
+<link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+<div class="top-progress" id="top-progress" hidden></div>
+
+<!-- ══ splash: shown until the server reports the models loaded ════════ -->
+<div class="splash" id="splash">
+  <div class="splash-inner">
+    <svg class="splash-logo" viewBox="0 0 64 64" aria-hidden="true">
+      <path d="M14 10 30 11.5 14.5 39Z" fill="#F4EDE0" fill-opacity=".16"/>
+      <path d="M14 10C31 10 49.5 19.5 49.5 32S31 54 14 54" fill="none" stroke="#F4EDE0" stroke-width="3.6" stroke-linecap="round"/>
+      <path d="M30 11.5 14.5 39" stroke="#F4EDE0" stroke-width="2.2" stroke-linecap="round" stroke-opacity=".7"/>
+      <path d="M49.5 32 25.9 18.7" stroke="#5FD3C6" stroke-width="2.4" stroke-dasharray="3.5 3.5" stroke-linecap="round"/>
+      <circle cx="25.9" cy="18.7" r="2.6" fill="#5FD3C6"/>
+      <circle cx="49.5" cy="32" r="4.4" fill="#5FD3C6"/>
+    </svg>
+    <h1 data-i18n="app_title">Mammography Positioning Review</h1>
+    <p id="splash-note" data-i18n="splash_sub">Preparing the review workstation…</p>
+    <div class="progress progress-indeterminate"></div>
+    <ul class="splash-steps">
+      <li id="sp-server" data-i18n="sp_server">Connecting to the server</li>
+      <li id="sp-pose" data-i18n="sp_pose">Landmark models (MLO, CC)</li>
+      <li id="sp-seg" data-i18n="sp_seg">Segmentation model</li>
+      <li id="sp-lesion" data-i18n="sp_lesion">Lesion detector (optional)</li>
+    </ul>
+  </div>
+</div>
+
+<!-- ══ top bar ══════════════════════════════════════════════════ -->
+<header class="navbar navbar-clinical topbar d-print-none">
+  <div class="topbar-inner">
+    <div class="navbar-brand brand">
+      <svg class="brand-logo" viewBox="0 0 34 34" aria-hidden="true">
+        <rect x=".5" y=".5" width="33" height="33" rx="7" fill="none" stroke="rgba(244,237,224,.28)"/>
+        <path d="M7.4 5.4 16 6.2 7.7 20.7Z" fill="#F4EDE0" fill-opacity=".16"/>
+        <path d="M7.4 5.4C16.4 5.4 26.3 10.4 26.3 17S16.4 28.6 7.4 28.6" fill="none" stroke="#F4EDE0" stroke-width="1.9" stroke-linecap="round"/>
+        <path d="M16 6.2 7.7 20.7" stroke="#F4EDE0" stroke-width="1.2" stroke-linecap="round" stroke-opacity=".7"/>
+        <path d="M26.3 17 13.8 9.9" stroke="#5FD3C6" stroke-width="1.3" stroke-dasharray="2 2"/>
+        <circle cx="13.8" cy="9.9" r="1.5" fill="#5FD3C6"/>
+        <circle cx="26.3" cy="17" r="2.3" fill="#5FD3C6"/>
+      </svg>
+      <span class="brand-text">
+        <span id="app-title" data-i18n="app_title">Mammography Positioning Review</span>
+        <span class="brand-sub" data-i18n="subtitle">PNL · chest-wall distance · ΔD</span>
+      </span>
+    </div>
+
+    <div class="topbar-tools" id="review-tools" hidden>
+      <div class="threshold" data-i18n-title="threshold_title">
+        <label for="threshold-input" data-i18n="threshold_label">ΔD threshold</label>
+        <div class="threshold-field">
+          <button type="button" class="step" id="threshold-down" data-i18n-aria="decrease">−</button>
+          <input type="number" id="threshold-input" min="1" max="60" step="0.5" value="10" inputmode="decimal">
+          <span class="unit">mm</span>
+          <button type="button" class="step" id="threshold-up" data-i18n-aria="increase">+</button>
+        </div>
+      </div>
+      <div class="pager" id="pager" hidden>
+        <button type="button" class="step" id="page-prev" data-i18n-aria="prev_views">‹</button>
+        <span id="page-label">1 / 1</span>
+        <button type="button" class="step" id="page-next" data-i18n-aria="next_views">›</button>
+      </div>
+
+      <div class="popwrap">
+        <button type="button" class="btn btn-sm btn-ghost-clinical btn-icon" id="layout-toggle" aria-haspopup="true"
+                aria-expanded="false" data-i18n-title="layout_title">
+          <svg viewBox="0 0 16 16" aria-hidden="true">
+            <rect x="1" y="1" width="6" height="6" rx="1"/><rect x="9" y="1" width="6" height="6" rx="1"/>
+            <rect x="1" y="9" width="6" height="6" rx="1"/><rect x="9" y="9" width="6" height="6" rx="1"/>
+          </svg>
+        </button>
+        <div class="popover-card popover-layout" id="layout-pop" hidden>
+          <div class="cell-grid" id="cell-grid"></div>
+          <p class="pop-label" id="layout-label">2 × 2 · all four views</p>
+          <div class="pairing-row" id="pairing-row" hidden>
+            <span class="pop-key" data-i18n="pair">Pair</span>
+            <div class="seg-clinical seg-full" id="pairing"></div>
+          </div>
+          <label class="form-check form-switch check-row">
+            <input class="form-check-input" type="checkbox" id="crop-toggle" checked>
+            <span class="form-check-label" data-i18n="crop">Crop to tissue</span>
+          </label>
+          <label class="form-check form-switch check-row">
+            <input class="form-check-input" type="checkbox" id="sync-toggle" checked>
+            <span class="form-check-label" data-i18n="sync">Synchronise zoom &amp; pan</span>
+          </label>
+        </div>
+      </div>
+
+      <div class="popwrap">
+        <button type="button" class="btn btn-sm btn-ghost-clinical btn-icon" id="style-toggle" aria-haspopup="true"
+                aria-expanded="false" data-i18n-title="style_title">
+          <svg viewBox="0 0 16 16" aria-hidden="true">
+            <circle cx="8" cy="8" r="6.2" fill="none" stroke="currentColor" stroke-width="1.6"/>
+            <circle cx="8" cy="4.6" r="1.15"/><circle cx="11.2" cy="7.2" r="1.15"/>
+            <circle cx="5" cy="6.6" r="1.15"/><circle cx="7.2" cy="11.3" r="1.15"/>
+          </svg>
+        </button>
+        <div class="popover-card popover-style" id="style-pop" hidden>
+          <label class="slider-row">
+            <span data-i18n="fill_opacity">Fill opacity</span>
+            <input type="range" class="form-range" id="fill-alpha" min="0" max="60" step="1">
+            <output id="fill-alpha-out">16%</output>
+          </label>
+          <label class="slider-row">
+            <span data-i18n="line_width">Line width</span>
+            <input type="range" class="form-range" id="line-width" min="10" max="40" step="1">
+            <output id="line-width-out">2.0</output>
+          </label>
+          <div class="pop-divider"><span data-i18n="image">Image</span></div>
+          <label class="slider-row">
+            <span data-i18n="brightness">Brightness</span>
+            <input type="range" class="form-range" id="brightness" min="30" max="250" step="2">
+            <output id="brightness-out">1.00</output>
+          </label>
+          <label class="slider-row">
+            <span data-i18n="contrast">Contrast</span>
+            <input type="range" class="form-range" id="contrast" min="30" max="250" step="2">
+            <output id="contrast-out">1.00</output>
+          </label>
+          <label class="form-check form-switch check-row">
+            <input class="form-check-input" type="checkbox" id="invert-toggle">
+            <span class="form-check-label" data-i18n="invert">Invert grey scale</span>
+          </label>
+          <button type="button" class="btn btn-sm btn-outline-primary" id="window-reset" data-i18n="reset_window">Reset window</button>
+          <div class="color-grid" id="color-grid"></div>
+          <button type="button" class="btn btn-sm btn-outline-primary" id="style-reset" data-i18n="reset_appearance">Reset appearance</button>
+        </div>
+      </div>
+
+      <button type="button" class="btn btn-sm btn-ghost-clinical" id="criteria-toggle" aria-expanded="false">
+        <span data-i18n="criteria_btn">Criteria</span> <span class="score-chip" id="score-chip">—</span>
+      </button>
+      <button type="button" class="btn btn-sm btn-ghost-clinical" id="report-toggle" aria-expanded="false" data-i18n="report_btn">Report</button>
+      <button type="button" class="btn btn-sm btn-accent" id="open-editor" data-i18n="edit_labels">Edit labels</button>
+      <button type="button" class="btn btn-sm btn-ghost-clinical btn-icon" id="fullscreen-toggle" data-i18n-title="fullscreen_title">
+        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M1.5 5.5v-4h4M10.5 1.5h4v4M14.5 10.5v4h-4M5.5 14.5h-4v-4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+      </button>
+      <button type="button" class="btn btn-sm btn-ghost-clinical" id="new-study" data-i18n="new_study">New study</button>
+    </div>
+
+    <div class="topbar-right">
+      <div class="status-pill" id="status" data-state="loading">
+        <span class="status-dot"></span><span id="status-text" data-i18n="status_connecting">Connecting…</span>
+      </div>
+      <button type="button" class="btn btn-sm btn-ghost-clinical btn-icon" id="theme-toggle" data-i18n-title="theme_title">
+        <svg class="i-moon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>
+        <svg class="i-sun" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M12 2v2.5M12 19.5V22M2 12h2.5M19.5 12H22M4.9 4.9l1.8 1.8M17.3 17.3l1.8 1.8M4.9 19.1l1.8-1.8M17.3 6.7l1.8-1.8" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+      </button>
+      <div class="seg-clinical" role="group" data-i18n-aria="language">
+        <button type="button" class="btn btn-sm" data-lang="en">EN</button>
+        <button type="button" class="btn btn-sm" data-lang="tr">TR</button>
+      </div>
+    </div>
+  </div>
+</header>
+
+<div class="banner" id="banner" hidden role="alert">
+  <span id="banner-text"></span>
+  <button type="button" class="banner-close" id="banner-close" data-i18n-aria="dismiss">✕</button>
+</div>
+
+<!-- ══ landing ══════════════════════════════════════════════════ -->
+<main class="screen screen-landing" id="screen-landing">
+  <div class="container-xl">
+    <div class="page-header page-header-clinical">
+      <div class="page-pretitle" data-i18n="pretitle">Positioning quality</div>
+      <h2 class="page-title" data-i18n="headline">Two independent methods, one verdict per breast.</h2>
+    </div>
+
+    <div class="row g-3">
+      <div class="col-lg-7">
+        <div class="card upload-card">
+          <div class="card-body">
+            <div id="upload-idle">
+              <div class="dropzone-clinical" id="dropzone" tabindex="0" role="button" data-i18n-aria="drop_aria">
+                <svg viewBox="0 0 48 48" class="drop-icon" aria-hidden="true">
+                  <path d="M24 31V12m0 0-7 7m7-7 7 7" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+                  <path d="M9 29v7a3 3 0 0 0 3 3h24a3 3 0 0 0 3-3v-7" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/>
+                </svg>
+                <h3 class="mb-1" data-i18n="drop_main">Drop DICOM files or a study folder</h3>
+                <p class="text-secondary mb-3" data-i18n="upload_hint">R-MLO, L-MLO, R-CC and L-CC of one study — loose DICOM files or the study folder.</p>
+                <div class="drop-actions">
+                  <button type="button" class="btn btn-primary" id="choose-files" data-i18n="choose_files">Choose files</button>
+                  <button type="button" class="btn btn-outline-primary" id="choose-folder" data-i18n="choose_folder">Choose a folder</button>
+                </div>
+                <div class="drop-views">
+                  <span>R-MLO</span><span>L-MLO</span><span>R-CC</span><span>L-CC</span>
+                </div>
+              </div>
+              <details class="tree-hint">
+                <summary data-i18n="tree_summary">Accepted folder layout</summary>
+                <pre>case-042/
+  RMLO/  IM0001.dcm
+  LMLO/  IM0002.dcm
+  RCC/   IM0003.dcm
+  LCC/   IM0004.dcm</pre>
+                <p data-i18n="tree_note">The folder name carries the view, so the files inside can be named anything.</p>
+              </details>
+            </div>
+
+            <div class="upload-progress" id="upload-busy" hidden>
+              <div class="up-title"><strong data-i18n="upload_title">Open a study</strong><span id="upload-count"></span></div>
+              <div class="up-stage" id="st-upload">
+                <div class="up-head"><span data-i18n="st_upload">Uploading</span><span class="up-val" id="st-upload-val"></span></div>
+                <div class="progress"><div class="progress-bar bar-accent" id="st-upload-bar" style="width:0%"></div></div>
+              </div>
+              <div class="up-stage" id="st-analyse">
+                <div class="up-head"><span data-i18n="st_analyse">Reading DICOM, placing landmarks, segmenting</span><span class="up-val" id="st-analyse-val"></span></div>
+                <div class="progress" id="st-analyse-bar"><div class="progress-bar bar-accent" style="width:0%"></div></div>
+              </div>
+              <div class="up-stage" id="st-render">
+                <div class="up-head"><span data-i18n="st_render">Preparing the views</span><span class="up-val" id="st-render-val"></span></div>
+                <div class="progress"><div class="progress-bar bar-accent" id="st-render-bar" style="width:0%"></div></div>
+              </div>
+              <div class="text-end"><button type="button" class="btn btn-sm btn-outline-primary" id="upload-cancel" data-i18n="cancel">Cancel</button></div>
+            </div>
+            <input type="file" id="file-input" accept=".dcm,.dicom,application/dicom" multiple hidden>
+            <input type="file" id="folder-input" webkitdirectory directory multiple hidden>
+          </div>
+        </div>
+
+        <div class="card mt-3 recent-card" id="recent-block">
+          <div class="card-header">
+            <h3 class="card-title" data-i18n="recent">Recent studies</h3>
+            <div class="card-actions recent-actions">
+              <button type="button" class="link-btn" id="refresh-history" data-i18n="refresh">refresh</button>
+              <button type="button" class="link-btn danger" id="clear-history" data-i18n="clear">clear</button>
+            </div>
+          </div>
+          <ul class="history" id="history">
+            <li class="history-skeleton"><span class="skeleton-line"></span></li>
+            <li class="history-skeleton"><span class="skeleton-line"></span></li>
+          </ul>
+          <p class="recent-empty" id="recent-empty" hidden data-i18n="no_recent">No stored studies yet.</p>
+        </div>
+      </div>
+
+      <div class="col-lg-5">
+        <div class="card h-100">
+          <div class="card-header"><h3 class="card-title" data-i18n="how_title">How it works</h3></div>
+          <div class="card-body">
+            <p class="lede" data-i18n="lede">Drop a four-view study.</p>
+            <ol class="steps-clinical">
+              <li><strong data-i18n="step1">Upload</strong><span data-i18n="step1_d"></span></li>
+              <li><strong data-i18n="step2">Review</strong><span data-i18n="step2_d"></span></li>
+              <li><strong data-i18n="step3">Correct</strong><span data-i18n="step3_d"></span></li>
+            </ol>
+            <ul class="landing-points">
+              <li><span class="dot" style="background:#4d9cff"></span><span data-i18n="point1"></span></li>
+              <li><span class="dot" style="background:#2ee08a"></span><span data-i18n="point2"></span></li>
+              <li><span class="dot" style="background:#ff9f2e"></span><span data-i18n="point3"></span></li>
+            </ul>
+          </div>
+          <div class="card-footer text-secondary small">
+            <span data-i18n="privacy">Uploaded DICOMs are never written to disk.</span>
+            <span id="retention-note"></span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <footer class="footer-clinical">
+    <div class="container-xl d-flex flex-wrap justify-content-between gap-2">
+      <span data-i18n="disclaimer">Research prototype — not a medical device; every result must be checked by a reader.</span>
+      <span id="version"></span>
+    </div>
+  </footer>
+</main>
+
+<!-- ══ opening a study: skeleton of the review board ════════════ -->
+<main class="screen screen-processing" id="screen-processing" hidden aria-busy="true">
+  <div class="layerbar"><span class="skeleton-line w-50"></span></div>
+  <div class="board">
+    <aside class="rail"><div class="skeleton-card"></div><div class="skeleton-card"></div></aside>
+    <div class="quad quad-skeleton">
+      <div class="view-tile"><div class="tile-head"><span class="skeleton-line"></span></div><div class="skeleton-dark"></div></div>
+      <div class="view-tile"><div class="tile-head"><span class="skeleton-line"></span></div><div class="skeleton-dark"></div></div>
+      <div class="view-tile"><div class="tile-head"><span class="skeleton-line"></span></div><div class="skeleton-dark"></div></div>
+      <div class="view-tile"><div class="tile-head"><span class="skeleton-line"></span></div><div class="skeleton-dark"></div></div>
+    </div>
+    <aside class="rail"><div class="skeleton-card"></div><div class="skeleton-card"></div></aside>
+  </div>
+  <div class="review-foot"><span id="progress-text" data-i18n="opening">Opening study…</span></div>
+</main>
+
+<!-- ══ review ═══════════════════════════════════════════════════ -->
+<main class="screen screen-review" id="screen-review" hidden>
+  <div class="layerbar" id="layerbar"></div>
+
+  <div class="zoom-badge" id="zoom-badge" hidden>100%</div>
+
+  <div class="board">
+    <aside class="rail rail-right" id="rail-R"></aside>
+    <div class="quad" id="quad"></div>
+    <aside class="rail rail-left" id="rail-L"></aside>
+  </div>
+
+  <section class="criteria-drawer" id="criteria-drawer" hidden data-i18n-aria="criteria_title">
+    <header class="drawer-head">
+      <h2 data-i18n="criteria_title">Positioning criteria</h2>
+      <span class="drawer-counts" id="criteria-counts"></span>
+      <button type="button" class="btn btn-sm btn-ghost-secondary" id="criteria-close" data-i18n-aria="close">✕</button>
+    </header>
+    <div class="criteria-grid" id="criteria-grid"></div>
+    <p class="drawer-empty" id="criteria-empty" hidden data-i18n="criteria_empty"></p>
+  </section>
+
+  <div class="notes-pop" id="notes-pop" hidden data-i18n-aria="notes">
+    <header>
+      <h2 data-i18n="notes">Notes</h2>
+      <button type="button" class="btn btn-sm btn-ghost-secondary" id="notes-close" data-i18n-aria="close">✕</button>
+    </header>
+    <ul class="notices" id="notices"></ul>
+  </div>
+
+  <div class="review-foot">
+    <span id="study-meta">—</span>
+    <div class="foot-actions">
+      <button type="button" class="btn btn-sm btn-outline-primary" id="notes-toggle" aria-expanded="false" hidden>
+        <span data-i18n="notes">Notes</span> <span class="notes-count" id="notes-count">0</span>
+      </button>
+      <button type="button" class="btn btn-sm btn-outline-primary" id="download-labels" data-i18n="download_labels">Download labels</button>
+      <button type="button" class="btn btn-sm btn-outline-danger" id="delete-study" data-i18n="delete_study">Delete study</button>
+    </div>
+  </div>
+</main>
+
+<!-- ══ report panel ═════════════════════════════════════════════ -->
+<aside class="report-panel" id="report-panel" hidden data-i18n-aria="report">
+  <header class="report-head">
+    <h2 id="report-title" data-i18n="report">Report</h2>
+    <div class="seg-clinical lang-switch" id="report-lang" data-i18n-aria="report_lang"></div>
+    <button type="button" class="btn btn-sm btn-ghost-secondary" id="report-close" data-i18n-aria="close">✕</button>
+  </header>
+  <div class="report-body" id="report-body"></div>
+  <footer class="report-foot">
+    <span id="report-footer-note"></span>
+    <div class="report-actions">
+      <button type="button" class="btn btn-sm btn-outline-primary" id="report-copy" data-i18n="copy">Copy</button>
+      <button type="button" class="btn btn-sm btn-outline-primary" id="report-download" data-i18n="download">Download</button>
+      <button type="button" class="btn btn-sm btn-outline-primary" id="report-print" data-i18n="print">Print</button>
+    </div>
+  </footer>
+</aside>
+
+<!-- ══ editor ═══════════════════════════════════════════════════ -->
+<div class="editor" id="editor" hidden>
+  <header class="editor-bar">
+    <div class="editor-title">
+      <button type="button" class="btn btn-sm btn-ghost-clinical" id="editor-back" data-i18n="back">← Back to review</button>
+      <strong id="editor-view-name">—</strong>
+      <span class="dirty-dot" id="editor-dirty" hidden data-i18n-title="unsaved"></span>
+    </div>
+    <div class="editor-actions">
+      <button type="button" class="btn btn-sm btn-ghost-clinical" id="editor-undo" data-i18n="undo">Undo</button>
+      <button type="button" class="btn btn-sm btn-ghost-clinical" id="editor-reset" data-i18n="revert">Revert view</button>
+      <button type="button" class="btn btn-sm btn-accent" id="editor-save" data-i18n="save">Save &amp; recompute</button>
+    </div>
+  </header>
+
+  <div class="editor-body">
+    <aside class="editor-rail">
+      <section class="editor-card">
+        <h3 data-i18n="ed_view">View</h3>
+        <div class="view-switch" id="editor-views"></div>
+      </section>
+
+      <section class="editor-card">
+        <h3 data-i18n="ed_structure">Structure</h3>
+        <ul class="class-list" id="editor-classes"></ul>
+      </section>
+
+      <section class="editor-card">
+        <h3 data-i18n="ed_tool">Tool</h3>
+        <div class="tool-grid" id="editor-tools"></div>
+        <p class="tool-hint" id="tool-hint"></p>
+      </section>
+
+      <section class="editor-card">
+        <h3 data-i18n="ed_shortcuts">Shortcuts</h3>
+        <dl class="keys">
+          <dt>V</dt><dd data-i18n="k_select">Select</dd>
+          <dt>P</dt><dd data-i18n="k_polygon">Polygon</dd>
+          <dt>B</dt><dd data-i18n="k_box">Box</dd>
+          <dt>N</dt><dd data-i18n="k_point">Point</dd>
+          <dt>Enter</dt><dd data-i18n="k_finish">Finish polygon</dd>
+          <dt>Esc</dt><dd data-i18n="k_cancel">Cancel drawing</dd>
+          <dt data-i18n="key_alt_click">Alt+click</dt><dd data-i18n="k_delete_vertex">Delete a vertex or box</dd>
+          <dt data-i18n="key_shift_click">Shift+click</dt><dd data-i18n="k_insert">Insert a vertex</dd>
+          <dt>Ctrl+C / V</dt><dd data-i18n="k_copy">Copy / paste a box</dd>
+          <dt>Ctrl+D</dt><dd data-i18n="k_dup">Duplicate a box</dd>
+          <dt>Delete</dt><dd data-i18n="k_remove">Remove the selected box</dd>
+          <dt>Ctrl+Z</dt><dd data-i18n="k_undo">Undo</dd>
+          <dt data-i18n="key_dblclick">Double-click</dt><dd data-i18n="k_fit">Fit to view</dd>
+          <dt data-i18n="key_scroll">Scroll</dt><dd data-i18n="k_zoom">Zoom</dd>
+          <dt data-i18n="key_middle">Middle-drag</dt><dd data-i18n="k_pan">Pan</dd>
+        </dl>
+      </section>
+    </aside>
+
+    <div class="editor-stage" id="editor-stage">
+      <canvas id="editor-canvas"></canvas>
+      <div class="viewport-zoom">
+        <button type="button" class="vz-btn" id="editor-zoom-out" data-i18n-aria="zoom_out">−</button>
+        <span id="editor-zoom-level">100%</span>
+        <button type="button" class="vz-btn" id="editor-zoom-in" data-i18n-aria="zoom_in">+</button>
+        <button type="button" class="vz-btn vz-text" id="editor-zoom-fit" data-i18n="fit">Fit</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ══ lightbox ═════════════════════════════════════════════════ -->
+<div class="lightbox" id="lightbox" hidden role="dialog" aria-modal="true" data-i18n-aria="lightbox_aria">
+  <div class="lightbox-bar">
+    <strong id="lightbox-title">—</strong>
+    <div class="lightbox-tools">
+      <button type="button" class="btn btn-sm btn-ghost-clinical" id="zoom-out" data-i18n-aria="zoom_out">−</button>
+      <span class="zoom-level" id="zoom-level">100%</span>
+      <button type="button" class="btn btn-sm btn-ghost-clinical" id="zoom-in" data-i18n-aria="zoom_in">+</button>
+      <button type="button" class="btn btn-sm btn-ghost-clinical" id="zoom-reset" data-i18n="fit">Fit</button>
+      <button type="button" class="btn btn-sm btn-ghost-clinical" id="lightbox-close" data-i18n-aria="close">✕</button>
+    </div>
+  </div>
+  <div class="lightbox-stage" id="lightbox-stage"></div>
+  <p class="lightbox-hint" data-i18n="lightbox_hint">Drag to pan · Scroll to zoom · Esc to close</p>
+</div>
+
+<script type="module" src="/static/js/main.js"></script>
+</body>
+</html>

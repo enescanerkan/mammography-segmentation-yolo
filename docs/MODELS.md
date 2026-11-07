@@ -6,6 +6,8 @@ Weights are not part of the repository; they are distributed separately and plac
 (`weights_dir` of `configs/paths.yaml`, or the root given to the model registry `configs/models.yaml`).
 
 This page describes recipes only. It deliberately contains no results.
+Layer diagrams of every architecture are in the [README](../README.md#models) and in
+[`docs/figures/architectures/`](figures/architectures).
 
 ## Conventions
 

@@ -1,0 +1,147 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1290" height="860" viewBox="0 0 1290 860" font-family="Inter, 'Segoe UI', -apple-system, Helvetica, Arial, sans-serif">
+<defs>
+<marker id="ah-a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#6B7488"/></marker>
+<marker id="ah-s" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#0E7C7B"/></marker>
+<marker id="ah-io" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#8A93A6"/></marker>
+<marker id="ah-enc" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#2A3B66"/></marker>
+<marker id="ah-dec" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#0E7C7B"/></marker>
+<marker id="ah-head" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#B9771A"/></marker>
+<marker id="ah-attn" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#6B4FA0"/></marker>
+<marker id="ah-cond" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#B03A2E"/></marker>
+<marker id="ah-op" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#6B7488"/></marker>
+<marker id="ah-frozen" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#8A93A6"/></marker>
+</defs>
+<rect width="100%" height="100%" rx="10" fill="#FFFFFF"/>
+<text x="24.0" y="34.0" font-size="19" text-anchor="start" fill="#14213D" font-weight="600">Landmark models · YOLO26l-pose (MLO and CC)</text>
+<text x="24.0" y="56.0" font-size="12.5" text-anchor="start" fill="#5B6478">3 × 640 × 640 wavelet canvas  →  breast box + keypoints · 27.9 M parameters</text>
+<rect x="20" y="76" width="360" height="644" rx="9" fill="#F6F7F9" stroke="#E3E6EC"/>
+<text x="32.0" y="95.0" font-size="10.5" text-anchor="start" fill="#5B6478" font-weight="600">BACKBONE</text>
+<rect x="400" y="76" width="480" height="644" rx="9" fill="#F6F7F9" stroke="#E3E6EC"/>
+<text x="412.0" y="95.0" font-size="10.5" text-anchor="start" fill="#5B6478" font-weight="600">NECK</text>
+<text x="868.0" y="95.0" font-size="10.5" text-anchor="end" fill="#5B6478">top-down (FPN) · bottom-up (PAN)</text>
+<rect x="900" y="76" width="370" height="644" rx="9" fill="#F6F7F9" stroke="#E3E6EC"/>
+<text x="912.0" y="95.0" font-size="10.5" text-anchor="start" fill="#5B6478" font-weight="600">HEAD</text>
+<rect x="40" y="112" width="320" height="40" rx="6" fill="#F3F1EC" stroke="#8A93A6" stroke-width="1.2"/>
+<text x="50.0" y="129.0" font-size="12.5" text-anchor="start" fill="#14213D" font-weight="600">Input</text>
+<text x="50.0" y="143.5" font-size="11" text-anchor="start" fill="#5B6478" font-family="'JetBrains Mono', 'SFMono-Regular', Consolas, 'Liberation Mono', monospace">3 × 640 × 640</text>
+<rect x="40" y="162" width="320" height="40" rx="6" fill="#E7ECF5" stroke="#2A3B66" stroke-width="1.2"/>
+<text x="50.0" y="179.0" font-size="12.5" text-anchor="start" fill="#14213D" font-weight="600">Conv 3×3, stride 2</text>
+<text x="50.0" y="193.5" font-size="11" text-anchor="start" fill="#5B6478" font-family="'JetBrains Mono', 'SFMono-Regular', Consolas, 'Liberation Mono', monospace">64 × 320 × 320</text>
+<text x="351.0" y="194.0" font-size="10.5" text-anchor="end" fill="#2A3B66" font-weight="600">/2</text>
+<rect x="40" y="212" width="320" height="40" rx="6" fill="#E7ECF5" stroke="#2A3B66" stroke-width="1.2"/>
+<text x="50.0" y="229.0" font-size="12.5" text-anchor="start" fill="#14213D" font-weight="600">Conv 3×3, stride 2</text>
+<text x="50.0" y="243.5" font-size="11" text-anchor="start" fill="#5B6478" font-family="'JetBrains Mono', 'SFMono-Regular', Consolas, 'Liberation Mono', monospace">128 × 160 × 160</text>
+<text x="351.0" y="244.0" font-size="10.5" text-anchor="end" fill="#2A3B66" font-weight="600">/4</text>
+<rect x="40" y="262" width="320" height="40" rx="6" fill="#E7ECF5" stroke="#2A3B66" stroke-width="1.2"/>
+<text x="50.0" y="279.0" font-size="12.5" text-anchor="start" fill="#14213D" font-weight="600">C3k2 ×2</text>
+<text x="50.0" y="293.5" font-size="11" text-anchor="start" fill="#5B6478" font-family="'JetBrains Mono', 'SFMono-Regular', Consolas, 'Liberation Mono', monospace">256 × 160 × 160</text>
+<rect x="40" y="312" width="320" height="40" rx="6" fill="#E7ECF5" stroke="#2A3B66" stroke-width="1.2"/>
+<text x="50.0" y="329.0" font-size="12.5" text-anchor="start" fill="#14213D" font-weight="600">Conv 3×3, stride 2</text>
+<text x="50.0" y="343.5" font-size="11" text-anchor="start" fill="#5B6478" font-family="'JetBrains Mono', 'SFMono-Regular', Consolas, 'Liberation Mono', monospace">256 × 80 × 80</text>
+<text x="351.0" y="344.0" font-size="10.5" text-anchor="end" fill="#2A3B66" font-weight="600">/8</text>
+<rect x="40" y="362" width="320" height="40" rx="6" fill="#E7ECF5" stroke="#2A3B66" stroke-width="1.2"/>
+<text x="50.0" y="379.0" font-size="12.5" text-anchor="start" fill="#14213D" font-weight="600">C3k2 ×2</text>
+<text x="50.0" y="393.5" font-size="11" text-anchor="start" fill="#5B6478" font-family="'JetBrains Mono', 'SFMono-Regular', Consolas, 'Liberation Mono', monospace">512 × 80 × 80</text>
+<text x="351.0" y="394.0" font-size="10.5" text-anchor="end" fill="#2A3B66" font-weight="600">P3</text>
+<rect x="40" y="412" width="320" height="40" rx="6" fill="#E7ECF5" stroke="#2A3B66" stroke-width="1.2"/>
+<text x="50.0" y="429.0" font-size="12.5" text-anchor="start" fill="#14213D" font-weight="600">Conv 3×3, stride 2</text>
+<text x="50.0" y="443.5" font-size="11" text-anchor="start" fill="#5B6478" font-family="'JetBrains Mono', 'SFMono-Regular', Consolas, 'Liberation Mono', monospace">512 × 40 × 40</text>
+<text x="351.0" y="444.0" font-size="10.5" text-anchor="end" fill="#2A3B66" font-weight="600">/16</text>
+<rect x="40" y="462" width="320" height="40" rx="6" fill="#E7ECF5" stroke="#2A3B66" stroke-width="1.2"/>
+<text x="50.0" y="479.0" font-size="12.5" text-anchor="start" fill="#14213D" font-weight="600">C3k2 ×2 (C3k blocks)</text>
+<text x="50.0" y="493.5" font-size="11" text-anchor="start" fill="#5B6478" font-family="'JetBrains Mono', 'SFMono-Regular', Consolas, 'Liberation Mono', monospace">512 × 40 × 40</text>
+<text x="351.0" y="494.0" font-size="10.5" text-anchor="end" fill="#2A3B66" font-weight="600">P4</text>
+<rect x="40" y="512" width="320" height="40" rx="6" fill="#E7ECF5" stroke="#2A3B66" stroke-width="1.2"/>
+<text x="50.0" y="529.0" font-size="12.5" text-anchor="start" fill="#14213D" font-weight="600">Conv 3×3, stride 2</text>
+<text x="50.0" y="543.5" font-size="11" text-anchor="start" fill="#5B6478" font-family="'JetBrains Mono', 'SFMono-Regular', Consolas, 'Liberation Mono', monospace">512 × 20 × 20</text>
+<text x="351.0" y="544.0" font-size="10.5" text-anchor="end" fill="#2A3B66" font-weight="600">/32</text>
+<rect x="40" y="562" width="320" height="40" rx="6" fill="#E7ECF5" stroke="#2A3B66" stroke-width="1.2"/>
+<text x="50.0" y="579.0" font-size="12.5" text-anchor="start" fill="#14213D" font-weight="600">C3k2 ×2 (C3k blocks)</text>
+<text x="50.0" y="593.5" font-size="11" text-anchor="start" fill="#5B6478" font-family="'JetBrains Mono', 'SFMono-Regular', Consolas, 'Liberation Mono', monospace">512 × 20 × 20</text>
+<rect x="40" y="612" width="320" height="40" rx="6" fill="#E7ECF5" stroke="#2A3B66" stroke-width="1.2"/>
+<text x="50.0" y="629.0" font-size="12.5" text-anchor="start" fill="#14213D" font-weight="600">SPPF (5×5 max-pool ×3)</text>
+<text x="50.0" y="643.5" font-size="11" text-anchor="start" fill="#5B6478" font-family="'JetBrains Mono', 'SFMono-Regular', Consolas, 'Liberation Mono', monospace">512 × 20 × 20</text>
+<rect x="40" y="662" width="320" height="40" rx="6" fill="#EEE8F6" stroke="#6B4FA0" stroke-width="1.2"/>
+<text x="50.0" y="679.0" font-size="12.5" text-anchor="start" fill="#14213D" font-weight="600">C2PSA ×2 (self-attention)</text>
+<text x="50.0" y="693.5" font-size="11" text-anchor="start" fill="#5B6478" font-family="'JetBrains Mono', 'SFMono-Regular', Consolas, 'Liberation Mono', monospace">512 × 20 × 20</text>
+<text x="351.0" y="694.0" font-size="10.5" text-anchor="end" fill="#6B4FA0" font-weight="600">P5</text>
+<rect x="418" y="457" width="215" height="50" rx="6" fill="#E1F0EF" stroke="#0E7C7B" stroke-width="1.2"/>
+<text x="428.0" y="479.0" font-size="12.5" text-anchor="start" fill="#14213D" font-weight="600">upsample ×2, concat P4, C3k2 ×2</text>
+<text x="428.0" y="493.5" font-size="11" text-anchor="start" fill="#5B6478" font-family="'JetBrains Mono', 'SFMono-Regular', Consolas, 'Liberation Mono', monospace">512 × 40 × 40</text>
+<rect x="418" y="357" width="215" height="50" rx="6" fill="#E1F0EF" stroke="#0E7C7B" stroke-width="1.2"/>
+<text x="428.0" y="379.0" font-size="12.5" text-anchor="start" fill="#14213D" font-weight="600">upsample ×2, concat P3, C3k2 ×2</text>
+<text x="428.0" y="393.5" font-size="11" text-anchor="start" fill="#5B6478" font-family="'JetBrains Mono', 'SFMono-Regular', Consolas, 'Liberation Mono', monospace">256 × 80 × 80</text>
+<text x="624.0" y="399.0" font-size="10.5" text-anchor="end" fill="#0E7C7B" font-weight="600">P3'</text>
+<rect x="650" y="457" width="215" height="50" rx="6" fill="#E1F0EF" stroke="#0E7C7B" stroke-width="1.2"/>
+<text x="660.0" y="479.0" font-size="12.5" text-anchor="start" fill="#14213D" font-weight="600">conv s2, concat, C3k2 ×2</text>
+<text x="660.0" y="493.5" font-size="11" text-anchor="start" fill="#5B6478" font-family="'JetBrains Mono', 'SFMono-Regular', Consolas, 'Liberation Mono', monospace">512 × 40 × 40</text>
+<text x="856.0" y="499.0" font-size="10.5" text-anchor="end" fill="#0E7C7B" font-weight="600">P4'</text>
+<rect x="650" y="657" width="215" height="50" rx="6" fill="#E1F0EF" stroke="#0E7C7B" stroke-width="1.2"/>
+<text x="660.0" y="679.0" font-size="12.5" text-anchor="start" fill="#14213D" font-weight="600">conv s2, concat P5, C3k2 (PSA)</text>
+<text x="660.0" y="693.5" font-size="11" text-anchor="start" fill="#5B6478" font-family="'JetBrains Mono', 'SFMono-Regular', Consolas, 'Liberation Mono', monospace">512 × 20 × 20</text>
+<text x="856.0" y="699.0" font-size="10.5" text-anchor="end" fill="#0E7C7B" font-weight="600">P5'</text>
+<rect x="912" y="355" width="210" height="54" rx="6" fill="#F8EDDB" stroke="#B9771A" stroke-width="1.2"/>
+<text x="922.0" y="372.5" font-size="12.5" text-anchor="start" fill="#14213D" font-weight="600">Pose26 head · /8</text>
+<text x="922.0" y="387.0" font-size="11" text-anchor="start" fill="#5B6478" font-family="'JetBrains Mono', 'SFMono-Regular', Consolas, 'Liberation Mono', monospace">80 × 80 cells</text>
+<text x="922.0" y="400.5" font-size="11" text-anchor="start" fill="#5B6478">box 4 · score 1 · keypoints K×3</text>
+<rect x="912" y="455" width="210" height="54" rx="6" fill="#F8EDDB" stroke="#B9771A" stroke-width="1.2"/>
+<text x="922.0" y="472.5" font-size="12.5" text-anchor="start" fill="#14213D" font-weight="600">Pose26 head · /16</text>
+<text x="922.0" y="487.0" font-size="11" text-anchor="start" fill="#5B6478" font-family="'JetBrains Mono', 'SFMono-Regular', Consolas, 'Liberation Mono', monospace">40 × 40 cells</text>
+<text x="922.0" y="500.5" font-size="11" text-anchor="start" fill="#5B6478">box 4 · score 1 · keypoints K×3</text>
+<rect x="912" y="655" width="210" height="54" rx="6" fill="#F8EDDB" stroke="#B9771A" stroke-width="1.2"/>
+<text x="922.0" y="672.5" font-size="12.5" text-anchor="start" fill="#14213D" font-weight="600">Pose26 head · /32</text>
+<text x="922.0" y="687.0" font-size="11" text-anchor="start" fill="#5B6478" font-family="'JetBrains Mono', 'SFMono-Regular', Consolas, 'Liberation Mono', monospace">20 × 20 cells</text>
+<text x="922.0" y="700.5" font-size="11" text-anchor="start" fill="#5B6478">box 4 · score 1 · keypoints K×3</text>
+<rect x="1040" y="724" width="220" height="92" rx="6" fill="#F3F1EC" stroke="#8A93A6" stroke-width="1.2"/>
+<text x="1050.0" y="747.5" font-size="12.5" text-anchor="start" fill="#14213D" font-weight="600">Top 300 boxes, no NMS</text>
+<text x="1050.0" y="762.0" font-size="11" text-anchor="start" fill="#5B6478" font-family="'JetBrains Mono', 'SFMono-Regular', Consolas, 'Liberation Mono', monospace">300 × (6 + 3K)</text>
+<text x="1050.0" y="775.5" font-size="11" text-anchor="start" fill="#5B6478">highest-scoring 'Breast' box</text>
+<text x="1050.0" y="788.5" font-size="11" text-anchor="start" fill="#5B6478">MLO: nipple, pectoral top,</text>
+<text x="1050.0" y="801.5" font-size="11" text-anchor="start" fill="#5B6478">pectoral bottom · CC: nipple</text>
+<path d="M200.0,152.0 L200.0,162.0" fill="none" stroke="#6B7488" stroke-width="1.4" marker-end="url(#ah-a)"/>
+<path d="M200.0,202.0 L200.0,212.0" fill="none" stroke="#6B7488" stroke-width="1.4" marker-end="url(#ah-a)"/>
+<path d="M200.0,252.0 L200.0,262.0" fill="none" stroke="#6B7488" stroke-width="1.4" marker-end="url(#ah-a)"/>
+<path d="M200.0,302.0 L200.0,312.0" fill="none" stroke="#6B7488" stroke-width="1.4" marker-end="url(#ah-a)"/>
+<path d="M200.0,352.0 L200.0,362.0" fill="none" stroke="#6B7488" stroke-width="1.4" marker-end="url(#ah-a)"/>
+<path d="M200.0,402.0 L200.0,412.0" fill="none" stroke="#6B7488" stroke-width="1.4" marker-end="url(#ah-a)"/>
+<path d="M200.0,452.0 L200.0,462.0" fill="none" stroke="#6B7488" stroke-width="1.4" marker-end="url(#ah-a)"/>
+<path d="M200.0,502.0 L200.0,512.0" fill="none" stroke="#6B7488" stroke-width="1.4" marker-end="url(#ah-a)"/>
+<path d="M200.0,552.0 L200.0,562.0" fill="none" stroke="#6B7488" stroke-width="1.4" marker-end="url(#ah-a)"/>
+<path d="M200.0,602.0 L200.0,612.0" fill="none" stroke="#6B7488" stroke-width="1.4" marker-end="url(#ah-a)"/>
+<path d="M200.0,652.0 L200.0,662.0" fill="none" stroke="#6B7488" stroke-width="1.4" marker-end="url(#ah-a)"/>
+<path d="M360.0,682.0 L526.0,682.0 L525.5,507.0" fill="none" stroke="#6B7488" stroke-width="1.4" marker-end="url(#ah-a)"/>
+<path d="M360.0,482.0 L418.0,482.0" fill="none" stroke="#0E7C7B" stroke-width="1.4" stroke-dasharray="5 4" marker-end="url(#ah-s)"/>
+<text x="389.0" y="477.0" font-size="10.5" text-anchor="middle" fill="#5B6478">concat</text>
+<path d="M525.5,457.0 L525.5,407.0" fill="none" stroke="#6B7488" stroke-width="1.4" marker-end="url(#ah-a)"/>
+<path d="M360.0,382.0 L418.0,382.0" fill="none" stroke="#0E7C7B" stroke-width="1.4" stroke-dasharray="5 4" marker-end="url(#ah-s)"/>
+<text x="389.0" y="377.0" font-size="10.5" text-anchor="middle" fill="#5B6478">concat</text>
+<path d="M633.0,382.0 L757.0,382.0 L757.5,457.0" fill="none" stroke="#6B7488" stroke-width="1.4" marker-end="url(#ah-a)"/>
+<path d="M633.0,482.0 L650.0,482.0" fill="none" stroke="#0E7C7B" stroke-width="1.4" stroke-dasharray="5 4" marker-end="url(#ah-s)"/>
+<path d="M757.5,507.0 L757.5,657.0" fill="none" stroke="#6B7488" stroke-width="1.4" marker-end="url(#ah-a)"/>
+<path d="M526.0,682.0 L650.0,682.0" fill="none" stroke="#0E7C7B" stroke-width="1.4" stroke-dasharray="5 4" marker-end="url(#ah-s)"/>
+<text x="588.0" y="677.0" font-size="10.5" text-anchor="middle" fill="#5B6478">concat</text>
+<path d="M633.0,382.0 L880.0,382.0 L880.0,382.0 L912.0,382.0" fill="none" stroke="#6B7488" stroke-width="1.4" marker-end="url(#ah-a)"/>
+<path d="M865.0,482.0 L912.0,482.0" fill="none" stroke="#6B7488" stroke-width="1.4" marker-end="url(#ah-a)"/>
+<path d="M865.0,682.0 L912.0,682.0" fill="none" stroke="#6B7488" stroke-width="1.4" marker-end="url(#ah-a)"/>
+<path d="M1122.0,382.0 L1140.0,382.0" fill="none" stroke="#6B7488" stroke-width="1.4"/>
+<path d="M1122.0,482.0 L1140.0,482.0" fill="none" stroke="#6B7488" stroke-width="1.4"/>
+<path d="M1122.0,682.0 L1140.0,682.0" fill="none" stroke="#6B7488" stroke-width="1.4"/>
+<path d="M1140.0,382.0 L1140.0,682.0" fill="none" stroke="#6B7488" stroke-width="1.4"/>
+<path d="M1140.0,682.0 L1140.0,724.0" fill="none" stroke="#6B7488" stroke-width="1.4" marker-end="url(#ah-a)"/>
+<text x="28.0" y="742.0" font-size="11.5" text-anchor="start" fill="#5B6478">Ultralytics YOLO26l-pose, one class ('Breast') whose box carries the keypoints; input: wavelet640 canvas (NLM, db4 detail boost, CLAHE).</text>
+<text x="28.0" y="759.0" font-size="11.5" text-anchor="start" fill="#5B6478">Keypoints K = 3 for MLO (kpt_shape [3, 3]), K = 1 for CC ([1, 3]); each keypoint is (x, y, visibility). One-to-one assignment: the head ranks the 8 400 cells</text>
+<text x="28.0" y="776.0" font-size="11.5" text-anchor="start" fill="#5B6478">(80² + 40² + 20²) and keeps the top 300, so no non-maximum suppression is needed. Box regression is direct (reg_max 1, no DFL). Parameters: 27.93 M (MLO), 27.93 M (CC).</text>
+<text x="28.0" y="793.0" font-size="11.5" text-anchor="start" fill="#5B6478">l scale: width 1.0, depth 1.0 (C3k2 / C2PSA blocks repeated twice), at most 512 channels.</text>
+<rect x="28" y="828" width="14" height="12" rx="3" fill="#F3F1EC" stroke="#8A93A6"/>
+<text x="48.0" y="838.0" font-size="11" text-anchor="start" fill="#5B6478">input / output</text>
+<rect x="159.60000000000002" y="828" width="14" height="12" rx="3" fill="#E7ECF5" stroke="#2A3B66"/>
+<text x="179.6" y="838.0" font-size="11" text-anchor="start" fill="#5B6478">encoder / backbone</text>
+<rect x="316.8" y="828" width="14" height="12" rx="3" fill="#E1F0EF" stroke="#0E7C7B"/>
+<text x="336.8" y="838.0" font-size="11" text-anchor="start" fill="#5B6478">decoder / neck</text>
+<rect x="448.40000000000003" y="828" width="14" height="12" rx="3" fill="#F8EDDB" stroke="#B9771A"/>
+<text x="468.4" y="838.0" font-size="11" text-anchor="start" fill="#5B6478">head</text>
+<rect x="516.0" y="828" width="14" height="12" rx="3" fill="#EEE8F6" stroke="#6B4FA0"/>
+<text x="536.0" y="838.0" font-size="11" text-anchor="start" fill="#5B6478">attention / transformer</text>
+<path d="M705.2,834 L731.2,834" stroke="#0E7C7B" stroke-width="1.4" stroke-dasharray="5 4"/>
+<text x="737.2" y="838.0" font-size="11" text-anchor="start" fill="#5B6478">lateral (concat)</text>
+</svg>

@@ -27,6 +27,8 @@ with a command line, a review web application, a training framework and the anno
   only, weights included; built, self-tested and published by GitHub Actions on every change (`dev-build`) and for
   every `v*` tag. The review app's weights are published in the `weights-v1` release (`packaging/weights.py`).
 - Documentation: `docs/APP.md`, `docs/MODELS.md`, `docs/TRAINING.md`, `docs/EVALUATION.md`.
+- Architecture figures of every model (light and dark SVG, `docs/figures/architectures`, drawn by
+  `tools/figures/architectures.py`) and a model overview in the README.
 
 ### Changed
 - src layout; heavy dependencies are optional extras (`app`, `models`, `dicom`, `train`, `segformer`, `nnunet`,

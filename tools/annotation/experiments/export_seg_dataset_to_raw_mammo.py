@@ -1,19 +1,19 @@
 """
-Export YOLO-seg `seg-dataset/` (PNG images + polygon `.txt` labels) to the layout
+Export a YOLO-seg dataset (PNG images + polygon `.txt` labels) to the raster layout
 expected by `zero_shot_test.py` / `prepare_medsam2_data.py`:
 
-  medsam2_experiments/data/raw_mammo/images/{stem}.png
-  medsam2_experiments/data/raw_mammo/masks/{stem}.png   # uint8, 0=bg, 1=YOLO0, 2=YOLO1, 3=YOLO2
+  experiments/data/raw_mammo/images/{stem}.png
+  experiments/data/raw_mammo/masks/{stem}.png   # uint8, 0=bg, 1=YOLO0, 2=YOLO1, 3=YOLO2
 
 YOLO class ids follow `seg-dataset/data.yaml`:
   0 -> mask pixel 1 (pectoral)
   1 -> mask pixel 2 (breast-tissue)
   2 -> mask pixel 3 (nipple)
 
-Run from repo root or from `medsam2_experiments/`:
+Run:
 
-  python export_seg_dataset_to_raw_mammo.py
-  python export_seg_dataset_to_raw_mammo.py --seg-root ../seg-dataset
+  python tools/annotation/experiments/export_seg_dataset_to_raw_mammo.py
+  python tools/annotation/experiments/export_seg_dataset_to_raw_mammo.py --seg-root /path/to/seg-dataset
 """
 
 from __future__ import annotations
@@ -73,13 +73,13 @@ def main() -> None:
         "--seg-root",
         type=Path,
         default=None,
-        help="Path to seg-dataset (default: ../seg-dataset from this script)",
+        help="YOLO-seg dataset root (default: $SEG_DATASET_ROOT or <repo>/seg-dataset)",
     )
     parser.add_argument(
         "--out",
         type=Path,
         default=None,
-        help="Output raw_mammo root (default: medsam2_experiments/data/raw_mammo)",
+        help="Output raw_mammo root (default: experiments/data/raw_mammo)",
     )
     parser.add_argument(
         "--splits",
@@ -89,10 +89,10 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    here = Path(__file__).resolve().parent
-    project = here.parent
-    seg = args.seg_root or (project / "seg-dataset")
-    out_root = args.out or (here / "data" / "raw_mammo")
+    from config import RAW_MAMMO_ROOT, SEG_DATASET_ROOT
+
+    seg = args.seg_root or SEG_DATASET_ROOT
+    out_root = args.out or RAW_MAMMO_ROOT
     splits = [s.strip() for s in args.splits.split(",") if s.strip()]
 
     # YOLO 0,1,2 -> PNG mask pixel 1,2,3 (0 = background)
@@ -160,8 +160,7 @@ def main() -> None:
     print(f"  skipped (no label / empty / unreadable): {n_skip}")
     if n_warn:
         print(f"  renamed duplicates with split prefix: {n_warn}")
-    print("Next: from repo root use  python medsam2_experiments/zero_shot_test.py")
-    print("     or already inside medsam2_experiments:  python zero_shot_test.py")
+    print("Next: python tools/annotation/experiments/zero_shot_test.py")
 
 
 if __name__ == "__main__":

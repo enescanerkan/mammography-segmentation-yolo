@@ -1,41 +1,44 @@
 """
-Main application window -  Medical Imaging UI
-Layout: Compact top bar + Large visualization area
-Features: Zoom/Pan, Draggable landmarks, Live recalculation
+Breast Positioning main window.
+
+Layout: compact top bars + two large MLO / CC canvases.
+Features: zoom / pan, draggable landmarks, live recalculation of the distances.
 """
 
-import sys
-import os
+from __future__ import annotations
 
-from PyQt5.QtWidgets import (
-    QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
-    QMessageBox, QApplication, QStatusBar,
-    QGroupBox, QPushButton, QLabel, QTextEdit, QFileDialog,
-    QSizePolicy, QFrame, QSlider
-)
+import contextlib
+import os
+from pathlib import Path
+
+import matplotlib
+import numpy as np
 from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QFont, QTextCursor
+from PyQt5.QtWidgets import (
+    QApplication,
+    QFileDialog,
+    QFrame,
+    QHBoxLayout,
+    QLabel,
+    QMainWindow,
+    QMessageBox,
+    QPushButton,
+    QSizePolicy,
+    QSlider,
+    QStatusBar,
+    QTextEdit,
+    QVBoxLayout,
+    QWidget,
+)
 
-import numpy as np
-import matplotlib
-matplotlib.use('Qt5Agg')
-import matplotlib.pyplot as plt
-
-from gui.interactive_canvas import InteractiveCanvas
-from analysis.analysis_controller import AnalysisController
-from analysis.mlo_analyzer import MLOAnalyzer
-from analysis.cc_analyzer import CCAnalyzer
-from models.model_manager import ModelManager
-from data.data_manager import DataManager
-from utils.paths import app_logo_path, gui_bundle_root
-from utils.qt_icons import q_icon_from_png
-from version import DISPLAY_NAME, __version__
-
-# Local stylesheet retained as a safety net when this module is run
-# standalone (i.e. NOT inside the Mammography Toolkit). Inside the
-# toolkit, the parent app's QSS already covers everything and overrides
-# this on a per-window basis.
-STYLESHEET = ""
+from ..analysis.analysis_controller import AnalysisController
+from ..analysis.cc_analyzer import CCAnalyzer
+from ..analysis.mlo_analyzer import MLOAnalyzer
+from ..data.data_manager import DataManager
+from ..models.model_manager import ModelManager
+from ..utils.paths import results_dir
+from .interactive_canvas import InteractiveCanvas
 
 # Match matplotlib figure colors to the toolkit palette.
 matplotlib.rcParams.update({
@@ -72,17 +75,9 @@ class MainApplicationWindow(QMainWindow):
         self.analysis_controller.on_comparison_complete = self._on_comparison_complete
 
     def _setup_window(self):
-        # Title is set by the toolkit; fall back to the legacy name when
-        # this module is run standalone.
         self.setWindowTitle("Mammography Toolkit — Breast Positioning")
-        _logo = app_logo_path()
-        if _logo is not None:
-            self.setWindowIcon(q_icon_from_png(_logo))
         self.setMinimumSize(1400, 900)
-        # Only apply the local stylesheet when not embedded in the toolkit
-        # (toolkit applies its own QSS over us).
-        if STYLESHEET:
-            self.setStyleSheet(STYLESHEET)
+        # The toolkit applies its own QSS over this window (see positioning_launcher).
         self._set_dark_titlebar()
 
         self.status_bar = QStatusBar()
@@ -390,14 +385,13 @@ class MainApplicationWindow(QMainWindow):
         Heuristic: scan recursively, group files whose names share a stem
         once 'mlo'/'cc' substrings are swapped. Case-insensitive.
         """
-        from pathlib import Path as _P
-        root = _P(folder)
+        root = Path(folder)
         files = sorted(
             p for p in root.rglob("*")
             if p.is_file() and p.suffix.lower() in (".dcm", ".dicom")
         )
         by_name = {p.stem.lower(): p for p in files}
-        used: set[_P] = set()
+        used: set[Path] = set()
         pairs: list[tuple[str, str]] = []
         for p in files:
             if p in used:
@@ -412,7 +406,7 @@ class MainApplicationWindow(QMainWindow):
                 mate = by_name[mate_stem]
                 mlo, cc = (p, mate) if "mlo" in stem else (mate, p)
                 pairs.append((str(mlo), str(cc)))
-                used.add(p); used.add(mate)
+                used.update((p, mate))
         unpaired = [str(p) for p in files if p not in used]
         return pairs, unpaired
 
@@ -474,10 +468,8 @@ class MainApplicationWindow(QMainWindow):
         self.threshold_label.setText(f"Threshold: {mm:.1f} mm")
         # Quiet update — only the next Compare/Save call uses the new
         # value. No live re-compare, no toast/popup.
-        try:
+        with contextlib.suppress(Exception):
             self.analysis_controller.comparison_engine.set_threshold(max(0.01, mm))
-        except Exception:
-            pass
 
     def _log(self, msg):
         # Subtle dim color for ASCII-separator divider lines, bright for
@@ -491,7 +483,6 @@ class MainApplicationWindow(QMainWindow):
     def _initialize_system(self):
         try:
             self.model_manager.load_models()
-            self.data_manager.load_pixel_spacing_data()
 
             self.sys_label.setText(f"Ready • Device: {self.model_manager.device}")
             self.sys_label.setObjectName("posStatusGood")
@@ -632,17 +623,17 @@ class MainApplicationWindow(QMainWindow):
             return
 
         import pandas as pd
-        results_dir = str(gui_bundle_root() / "results")
-        os.makedirs(results_dir, exist_ok=True)
+        out_dir = str(results_dir())
+        os.makedirs(out_dir, exist_ok=True)
         ts = pd.Timestamp.now().strftime("%Y%m%d_%H%M%S")
         saved = []
 
         if status['mlo']:
-            f = os.path.join(results_dir, f"mlo_{ts}.png")
+            f = os.path.join(out_dir, f"mlo_{ts}.png")
             self.mlo_canvas.fig.savefig(f, dpi=150, bbox_inches='tight', facecolor='#22262E')
             saved.append(f)
         if status['cc']:
-            f = os.path.join(results_dir, f"cc_{ts}.png")
+            f = os.path.join(out_dir, f"cc_{ts}.png")
             self.cc_canvas.fig.savefig(f, dpi=150, bbox_inches='tight', facecolor='#22262E')
             saved.append(f)
 
@@ -829,5 +820,4 @@ class MainApplicationWindow(QMainWindow):
     # ── Cleanup ──
 
     def closeEvent(self, event):
-        plt.close('all')
         event.accept()

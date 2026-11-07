@@ -1,221 +1,245 @@
-# MedSAM 2 experiments (mammography)
+# Mammography Annotation Toolkit
 
-Self-contained folder to try **MedSAM 2** on mammography PNGs with **multi-class PNG masks** (integer pixel labels), before committing to a full fine-tune.
+A PyQt5 desktop application for labelling mammograms and checking positioning. It
+produces YOLO-segmentation labels (pectoral muscle, breast tissue, nipple, or any classes
+you define) and shows the posterior nipple line (PNL) / CC depth computed from those labels
+with the same geometry as the `breast_seg` package.
 
-This repo’s YOLO path (`seg-dataset/`) uses **polygon `.txt` labels**, not PNG masks. MedSAM2 scripts need **raster masks** (`masks/*.png` with integer class pixels). Use the exporter:
+One launcher opens three tools; **File → Back to Main Menu** (`Ctrl+M`) switches between
+them without restarting.
+
+| Mode | What it does | Needs |
+|------|--------------|-------|
+| **SAM Label** | Draw a box or click points; a fine-tuned MedSAM2 model returns the mask. Refine it as a polygon. | MedSAM2 code + SAM2 base weights + fine-tuned checkpoint |
+| **Manual Label** | Polygon / box labelling with your own classes. Optional one-click YOLO box detector (for example a lesion detector) whose boxes become editable polygons. | Nothing (detector weights only for the auto-detect button) |
+| **Breast Positioning** | YOLO-pose landmarks on an MLO + CC DICOM pair; compares the MLO nipple-to-pectoral and CC nipple-to-chest-wall distances against a mm threshold. | Two YOLO-pose models |
+
+When a model file is missing, the mode says which file it expected and which config key
+sets it, then returns to the launcher (Manual mode itself needs no weights).
+
+## Modes
+
+### SAM Label (MedSAM2 prompting)
+
+1. Open an image or a folder (PNG / JPEG / TIFF / DICOM).
+2. Pick the class: **Pectoral Muscle** (`1`), **Breast Tissue** (`2`), **Nipple** (`3`).
+3. **Bounding Box** mode (`B`, default): click two opposite corners; the mask appears.
+   **Point** mode (`P`): left-click adds positive points. In both modes a right-click adds
+   an *ignore* point.
+4. Drag box corners or points to update the prediction; `Alt`+click deletes a point.
+5. **Edit Mask as Polygon** turns the mask into a draggable polygon (drag vertices, click
+   an edge to insert, `Alt`+click to delete). `Ctrl+Enter` commits it.
+6. `Ctrl+S` saves every annotated image as YOLO labels.
+
+Settings in the side panel:
+
+- **Ignore radius**: an ignore point removes a disk of this radius from the mask, whatever
+  the model predicts (and is also sent to the model as a negative point unless
+  **soft negative** is off).
+- **Implicit box**: with points only, a padded box around the positive points is sent too.
+  The fine-tuned decoder was trained with box prompts, so this keeps point prompts in
+  distribution.
+- **Class competition**: when you draw breast tissue after the pectoral muscle, the drawn
+  pectoral pixels are subtracted from the breast mask (the usual MLO leak).
+
+The model is class-agnostic: the selected class only sets the color, the YOLO id and the
+class-competition rule. Where you click decides what is segmented. Details:
+[docs/prompting.md](docs/prompting.md) and [docs/sam_label.md](docs/sam_label.md).
+
+### Manual Label (with the box detector)
+
+Manual mode starts with an empty class list: **＋ Add Custom Class** creates a class (the
+first one is YOLO id 0) with a unique color. Draw with **Bounding Box** (two clicks give a
+4-vertex polygon) or **Polygon** (click vertices, double-click / `Enter` closes). Several
+instances per class are kept; **◀ Prev / Next ▶** picks the instance to edit, right-click
+on a box renames or deletes it.
+
+**Run Box Detector** runs the YOLO detector configured as `detector.weights` on the current
+image and adds every detected box as a polygon of the *active* class (the detector's own
+class ids are ignored), ready for corner-drag refinement. See
+[docs/manual_label.md](docs/manual_label.md).
+
+### Breast Positioning
+
+Select an MLO + CC DICOM pair (or a folder; files are paired when swapping `mlo` / `cc` in
+the file name gives an existing file), run **MLO Analysis**, **CC Analysis**, then
+**Compare**. Landmarks are draggable and the distances update live. The threshold slider
+sets the mm tolerance used by Compare and Save. **Save Results** writes TXT / CSV / JSON and
+**Save Images** writes PNG figures to `positioning.results_dir`. See
+[docs/breast_positioning.md](docs/breast_positioning.md).
+
+### PNL / CC-depth overlay (SAM and Manual modes)
+
+Press **Measure** (`C`) after labelling the nipple plus the pectoral muscle and breast
+(MLO) or the nipple plus the breast (CC). The overlay draws the fitted pectoral line, the
+PNL perpendicular (or the CC depth line) and a HUD with the length in pixels. The geometry
+is `breast_seg.geometry` (pectoral line by the tangent rule, nipple centroid, foot point
+clamped to the pectoral segment), so the toolkit and the package always agree.
+
+## Installation
+
+Python 3.9+. From the repository root:
 
 ```bash
-cd medsam2_experiments
-python export_seg_dataset_to_raw_mammo.py
-# optional: --seg-root D:\path\to\seg-dataset --out data\raw_mammo
+pip install -e ".[annotation,models,dicom]"      # package + PyQt5, torch, ultralytics, DICOM codecs
+# or, without installing the package:
+pip install -r tools/annotation/requirements.txt
 ```
 
-That reads `seg-dataset/images/{train,val,test}/*.png` + matching `labels/{split}/*.txt`, draws polygons, and writes `data/raw_mammo/images/` + `masks/` with pixel values **0=bg, 1=pectoral (YOLO 0), 2=breast-tissue (YOLO 1), 3=nipple (YOLO 2)** — aligned with `config.py` → then run `zero_shot_test.py`.
+The toolkit imports `breast_seg.geometry`; if the package is not installed it falls back
+to `<repo>/src` automatically.
 
-Alternatively, supply your own PNG masks and set `MASK_CLASS_LABELS` accordingly.
+SAM mode additionally needs the MedSAM2 code (MedSAM2 branch of bowang-lab/MedSAM), which
+provides `sam2` and its Hydra configs:
 
-## Why MedSAM 2 here
+```bash
+git clone -b MedSAM2 https://github.com/bowang-lab/MedSAM.git tools/annotation/vendor/MedSAM
+pip install -e tools/annotation/vendor/MedSAM
+```
 
-- **Zero-shot first**: **SAM2** image weights + a **box prompt** (in our script: a tight **axis-aligned box from the GT mask**, padded slightly — an *oracle* box for evaluation) shows whether fine-tuning is worth it. This does **not** test “find the organ without a hint”; it tests “given a good box, how good is the mask?” For deployment, replace the box with a **human** or **detector** box.  
-- **Code path**: we import `sam2` from the bowang-lab **MedSAM** repository (MedSAM2 branch) for Hydra configs and `build_sam2`. Default checkpoint is **`sam2_hiera_tiny.pt`** (Meta **SAM2**), not necessarily Hugging Face `MedSAM2_latest.pt` unless you pass a compatible `--ckpt`.  
-- **Fine-tune later**: after zero-shot, use ~hundreds of **(image, box, mask)** instances from your cases.
+`tools/annotation/vendor/` is git-ignored; another location works through `medsam2.repo`.
+The toolkit adds that folder to `sys.path` itself, but `hydra-core` and `iopath` (listed
+in `requirements.txt`) must be importable.
+
+## Weights
+
+Model weights are not stored in git; they are distributed separately from the code (see
+`docs/MODELS.md` at the repository root). By default every file is looked up under
+`tools/annotation/weights/` (git-ignored):
+
+```
+tools/annotation/weights/
+├── medsam2/
+│   ├── sam2_hiera_tiny.pt          # SAM2 Hiera-Tiny base (Meta), architecture of the fine-tune
+│   └── medsam_model_best.pth       # fine-tuned MedSAM2 checkpoint (experiments/train_medsam2.py)
+├── detector/
+│   └── manual_detector.pt          # YOLO detection model for "Run Box Detector"
+└── positioning/
+    ├── mlo-yolo26-pose-advanced.pt # YOLO-pose: nipple + 2 pectoral-line points
+    └── cc-yolo26-pose-advanced.pt  # YOLO-pose: nipple
+```
+
+The SAM2 base checkpoint is Meta's public `sam2_hiera_tiny.pt`
+(`https://dl.fbaipublicfiles.com/segment_anything_2/072824/sam2_hiera_tiny.pt`).
+
+**The MedSAM2 checkpoint is explicit.** The app loads exactly the file set as
+`medsam2.checkpoint` (default `weights/medsam2/medsam_model_best.pth`, or
+`$MEDSAM2_CHECKPOINT`). It does not scan training folders for the newest run; after a new
+fine-tune, point the key at the run you want.
+
+## Configuration
+
+Settings are read from, in increasing priority: built-in defaults → a YAML file → one
+environment variable per key. The YAML file is `--config PATH`, else `$ANNOTATION_CONFIG`,
+else `tools/annotation/annotation.yaml` if present (git-ignored; start from
+[annotation.example.yaml](annotation.example.yaml)).
+
+| Key | Default | Environment variable |
+|-----|---------|----------------------|
+| `weights_root` | `weights` | `ANNOTATION_WEIGHTS_ROOT` |
+| `medsam2.repo` | `vendor/MedSAM` | `MEDSAM2_REPO` |
+| `medsam2.model_cfg` | `sam2_hiera_t.yaml` | `SAM2_MODEL_CFG` |
+| `medsam2.sam2_base` | `medsam2/sam2_hiera_tiny.pt` | `MEDSAM2_SAM2_BASE` |
+| `medsam2.checkpoint` | `medsam2/medsam_model_best.pth` | `MEDSAM2_CHECKPOINT` (legacy alias `MEDSAM2_INTERACTIVE_CKPT`) |
+| `medsam2.device` | `auto` (CUDA if available) | `MEDSAM2_DEVICE` |
+| `detector.weights` | `detector/manual_detector.pt` | `ANNOTATION_DETECTOR_WEIGHTS` |
+| `positioning.mlo_weights` | `positioning/mlo-yolo26-pose-advanced.pt` | `POSITIONING_MLO_WEIGHTS` |
+| `positioning.cc_weights` | `positioning/cc-yolo26-pose-advanced.pt` | `POSITIONING_CC_WEIGHTS` |
+| `positioning.results_dir` | `results/positioning` | `POSITIONING_RESULTS_DIR` |
+| `logs_dir` | `logs` | `ANNOTATION_LOGS_DIR` |
+
+Relative paths: `weights_root`, `medsam2.repo`, `positioning.results_dir` and `logs_dir`
+resolve against the YAML file's folder (or `tools/annotation/` without a YAML); weight files
+resolve against `weights_root`; relative paths in environment variables resolve against the
+current directory. Unknown YAML keys are reported in the log.
+
+## Running
+
+```bash
+python tools/annotation/app.py                   # launcher with the three tools
+python tools/annotation/app.py --config my.yaml
+python tools/annotation/app.py --print-config    # show the resolved paths and exit
+```
+
+The startup screen asks for an image or a folder for SAM / Manual mode. Opening a folder
+scans it recursively and resumes after the last image that already has a label file.
+
+## Output
+
+**Save All to YOLO** writes `labels/<stem>.txt` next to each image, one line per polygon
+instance:
+
+```
+<class_id> x1/W y1/H x2/W y2/H ...
+```
+
+Built-in classes map to YOLO ids `0` pectoral, `1` breast tissue, `2` nipple (the
+repository's segmentation datasets use the same ids). An edited polygon is written as
+drawn; otherwise the mask contours are exported.
+
+## Keyboard and mouse
+
+| Input | Action |
+|-------|--------|
+| `Ctrl+S` | Save all labels to YOLO |
+| `Ctrl+Z` | Undo the most recent polygon instance |
+| `Ctrl+M` | Back to the main menu (asks about unsaved work) |
+| `←` / `→` | Previous / next image in the folder |
+| `C` | Measure PNL (MLO) / CC depth |
+| `B` / `P` | Box / Point mode (SAM) |
+| `1` / `2` / `3` | Pectoral / Breast / Nipple (SAM) |
+| `Ctrl+Enter` | Commit the polygon edit |
+| `Del` | Delete the polygon being edited |
+| `Esc` | Cancel an unfinished box / polygon |
+| `Ctrl+0`, `Ctrl++`, `Ctrl+-`, `Ctrl`+wheel | Fit, zoom in, zoom out, zoom at cursor |
+| Middle-drag | Pan |
+| Right-drag | Window / level (brightness / contrast) |
+| Double-click background | Fit view and reset window / level |
 
 ## Layout
 
-| Path | Role |
-|------|------|
-| `config.py` | Paths, `MASK_CLASS_LABELS` (matches exporter: 1/2/3 = pectoral / breast / nipple), thresholds. |
-| `export_seg_dataset_to_raw_mammo.py` | **YOLO `seg-dataset` → `data/raw_mammo`** (PNG + raster mask from polygons). |
-| `zero_shot_test.py` | **SAM2** (`build_sam2` + `SAM2ImagePredictor` from bowang-lab **MedSAM** repo): GT-derived **oracle bbox** → mask → **Dice** per class. |
-| `build_view_map.py` | Writes `data/raw_mammo/view_map.csv` (`stem,view` = CC or MLO) from `compare-dataset/` so zero-shot figures and `metrics.csv` can show **view**. |
-| `prepare_medsam2_data.py` | PNG → `.npy` for `finetune_sam2_img.py` (**img 1024²×3**, **gt 256²** binary per sample). |
-| `inference_finetuned.py` | Load `medsam_model_best.pth` + SAM2 base, run one box on one image. |
-| `wrapped_model.py` | `MedSAM2` wrapper aligned with upstream `finetune_sam2_img.py` / `infer_medsam2_flare22.py`. |
-| `data/raw_mammo/` | Put `images/*.png` and `masks/*.png` here (gitignored). |
-
-**Important:** `bowang-lab/MedSAM` `finetune_sam2_img.py` expects each `gts/*.npy` to be **256×256** and each `imgs/*.npy` to be **1024×1024×3** (uint8). `prepare_medsam2_data.py` follows that.
-
-## 1) Install MedSAM 2 (separate clone)
-
-**Important Python & Conda Requirement for Windows:**
-You **must** use Python 3.10 and a Conda environment. Windows Store Python (e.g. 3.13 or 3.14) lacks pre-compiled PyTorch CUDA support, and compiling MedSAM's `setup.py` C++ extensions (`sam2._C`) will fail without the NVCC compiler.
-
-If you don't have Conda, you can install Miniconda silently via PowerShell:
-```powershell
-cd $env:USERPROFILE\Desktop
-Invoke-WebRequest -Uri "https://repo.anaconda.com/miniconda/Miniconda3-latest-Windows-x86_64.exe" -OutFile "miniconda_installer.exe"
-Start-Process -FilePath ".\miniconda_installer.exe" -ArgumentList "/S /RegisterPython=0 /D=$env:USERPROFILE\Miniconda3" -Wait
-& "$env:USERPROFILE\Miniconda3\Scripts\conda.exe" init powershell
 ```
-**CRITICAL:** After running the init command, you *must* completely close and reopen your VS Code / PowerShell windows for `conda` to be recognized!
-
-Once your terminal is restarted and you see `(base)` at the start of your prompt:
-```bash
-conda create -n medsam2 python=3.10 -y
-conda activate medsam2
-pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121
-
-# Assuming you cloned or will clone the repo:
-# git clone -b MedSAM2 https://github.com/bowang-lab/MedSAM.git
-cd MedSAM
-pip install -e .
+tools/annotation/
+├── app.py                  # entry point: startup launcher + mode controller
+├── toolkit_config.py       # config: defaults, YAML, environment variables
+├── annotation.example.yaml
+├── requirements.txt
+├── interactive/            # MedSAM2 inference stack (no Qt): model, prompts, post-processing, pipeline
+├── qt_app/
+│   ├── main_window.py      # StartupDialog + SAM / Manual MainWindow
+│   ├── canvas.py           # zoomable QGraphicsView: boxes, points, polygons, W/L, overlay
+│   ├── session.py          # in-memory annotation store + YOLO export
+│   ├── worker.py           # QThread for SAM inference (latest request wins)
+│   ├── detector.py         # YOLO box detector for Manual mode
+│   ├── pnl_analysis.py     # masks -> breast_seg.geometry -> overlay data
+│   ├── image_io.py         # PNG / JPEG / DICOM loading (VOI LUT, MONOCHROME1)
+│   ├── theme.py, logging_setup.py
+│   ├── positioning_launcher.py
+│   └── positioning/        # Breast Positioning tool (pose models, analysis, GUI)
+├── docs/                   # per-mode guides, prompting details, roadmap
+├── experiments/            # MedSAM2 research scripts (fine-tune, zero-shot), see its README
+└── tests/                  # offscreen tests, no weights needed
 ```
 
-Point this project at the clone (default: `medsam2_experiments/vendor/MedSAM`):
+## Tests and lint
 
 ```bash
-set MEDSAM2_REPO=C:\path\to\MedSAM
+QT_QPA_PLATFORM=offscreen python -m pytest tools/annotation/tests
+ruff check tools/annotation
 ```
 
-## 2) Checkpoints
+The tests hide CUDA, use an empty temporary weights folder and run Qt offscreen: they
+check the configuration rules, that the PNL overlay equals `breast_seg.geometry`, and that
+every window builds and reports missing weights.
 
-Download into `medsam2_experiments/checkpoints/` (gitignored):
+## Logs
 
-- [MedSAM2_latest.pt](https://huggingface.co/wanglab/MedSAM2/resolve/main/MedSAM2_latest.pt)  
-- [sam2_hiera_tiny.pt](https://dl.fbaipublicfiles.com/segment_anything_2/072824/sam2_hiera_tiny.pt)
+A rotating log (`qt_app.log`, 2 MB × 4) is written to `logs_dir` (default
+`tools/annotation/logs/`): resolved configuration, image loads, detector runs, inference
+errors and save reports.
 
-Fine-tune (per upstream README) uses **`sam2_hiera_tiny.pt`** as `-pretrain_model_path` for the image script. The Hugging Face `MedSAM2_latest.pt` file may **not** load into `sam2_hiera_t.yaml` on every checkout; if `build_sam2` fails on that file, keep using **tiny** as the backbone. Inference after your own fine-tune still uses SAM2 tiny + `medsam_model_best.pth`.
+## Research scripts
 
-## 2.5) From your YOLO `seg-dataset` (export masks)
-
-If you only have `seg-dataset/images/` + `seg-dataset/labels/` (polygon `.txt`), run once:
-
-```bash
-cd medsam2_experiments
-python export_seg_dataset_to_raw_mammo.py
-```
-
-This fills `data/raw_mammo/images/` and `data/raw_mammo/masks/` so `zero_shot_test.py` can run.
-
-### CC / MLO labels on outputs (optional)
-
-If you have `compare-dataset/CC/...` and `compare-dataset/MLO/...` in the project (same stems as exported `raw_mammo` images), build a lookup table once:
-
-```bash
-cd medsam2_experiments
-python build_view_map.py
-# writes data/raw_mammo/view_map.csv
-```
-
-`zero_shot_test.py` loads `<data-root>/view_map.csv` by default (`--view-map` to override). Rows in `metrics.csv` get a **`view`** column; `--save-vis` PNGs show **view=CC|MLO|?** in the top banner. Files named `{stem}_flipped` reuse the view of `{stem}`.
-
-**Important:** Full **pectoral / breast / nipple** masks must come from **`seg-dataset`** via `export_seg_dataset_to_raw_mammo.py`. The files under `compare-dataset/.../labels/*.txt` are often **not** full multi-class polygons (e.g. small pectoral triangle for pose); they are **only** used by `build_view_map.py` to tag **CC vs MLO** by image stem, not to build GT masks.
-
-To include **more MLO cases** in zero-shot, add MLO images + full YOLO-seg `.txt` into your `seg-dataset` source pool, run `build_dataset.py`, re-export `raw_mammo`, then `build_view_map.py` again.
-
-## 3) Zero-shot (Step 1)
-
-You already need:
-
-1. **MedSAM2 repo** on disk (e.g. `medsam2_experiments/vendor/MedSAM` from `git clone -b MedSAM2 ...`).
-2. **`PYTHONPATH`** pointing at that repo root (or `pip install -e .` inside a **conda Python 3.10 + CUDA** env — Store Python 3.13/3.14 often fails the CUDA extension build).
-3. **`hydra-core`** for the same interpreter: `python -m pip install hydra-core iopath` (use the same `python` you run the script with).
-4. Checkpoints under `medsam2_experiments/checkpoints/` — at minimum **`sam2_hiera_tiny.pt`**.
-
-**Do not** `cd medsam2_experiments` twice: if your prompt is already `...\medsam2_experiments>`, run `python zero_shot_test.py` only.
-
-Default weights for `zero_shot_test.py` are **SAM2 Hiera Tiny** (`ZERO_SHOT_CKPT` in `config.py`), not `MedSAM2_latest.pt`, so `build_sam2` matches `sam2_hiera_t.yaml`. Quick test:
-
-```powershell
-cd path\to\mammography-segmentation-yolo\medsam2_experiments
-$env:PYTHONPATH = "$PWD\vendor\MedSAM"
-$env:MEDSAM2_REPO = "$PWD\vendor\MedSAM"
-python zero_shot_test.py --limit 5 --device cpu
-```
-
-Optional overrides:
-
-```bash
-python zero_shot_test.py --ckpt checkpoints\MedSAM2_latest.pt   # only if compatible with your MedSAM commit
-set MEDSAM2_ZERO_SHOT_CKPT=C:\path\to\custom.pt
-```
-
-**Outputs** (each run overwrites the same folder by default):
-
-- `medsam2_experiments/data/zero_shot_output/metrics.csv` — one row per (case, class): `view`, Dice, SAM score, **`bbox_xyxy`** (oracle box fed to the model), **`model_label`** (e.g. SAM2 Hiera Tiny), checkpoint path  
-- `medsam2_experiments/data/zero_shot_output/summary.txt` — mean Dice per class, **plus mean Dice per class × view (CC / MLO / ?)** when views are known, and run metadata  
-- Optional **images**: `--save-vis` → PNGs in `.../zero_shot_output/pred_vis/`  
-  Each file: **Original (norm) | GT (green) | Prediction (magenta)** with column captions plus a **top meta bar** (case id, **view**, class, Dice, bbox-from-GT note, weights label).
-
-Override directory: `python zero_shot_test.py --out-dir D:\runs\zs1`
-
-Example with visuals:
-
-```powershell
-python zero_shot_test.py --limit 10 --save-vis --device cpu
-```
-
-Interpret mean Dice per class; if e.g. breast-tissue is already very high, you can limit fine-tune to harder classes.
-
-## 4) Prepare `.npy` for fine-tune (Step 2)
-
-```bash
-cd medsam2_experiments
-python prepare_medsam2_data.py --use-project-splits
-# writes data/medsam2_npy/{train,val,test}/imgs|gts + *.txt lists
-```
-
-If `../seg-dataset/images/{train,val,test}/` is missing, everything goes to `--default-split train`.
-
-## 5) Fine-tune (Step 3 — run inside MedSAM clone)
-
-If `finetune_sam2_img.py` fails on imports, install **once** in the same `(medsam2)` env (SAM2 `sam2/__init__.py` needs Hydra):
-
-```bash
-pip install hydra-core iopath scikit-image monai
-```
-
-**GPU / CUDA:** `-device cuda:0` only works if PyTorch is the **CUDA** build (`torch.cuda.is_available()` is `True`). A `+cpu` install causes `Torch not compiled with CUDA enabled`. Reinstall in the same env (choose a CUDA wheel that matches your GPU driver; [pytorch.org](https://pytorch.org/get-started/locally/) has the matrix), for example:
-
-```powershell
-python -m pip uninstall torch torchvision -y
-python -m pip install torch torchvision --index-url https://download.pytorch.org/whl/cu124
-```
-
-Then: `python -c "import torch; print(torch.cuda.is_available())"` → `True`. **CPU** (`-device cpu`) is only for tiny sanity runs, not real fine-tune.
-
-```bash
-cd %MEDSAM2_REPO%
-python finetune_sam2_img.py ^
-  -i C:\path\to\mammography-segmentation-yolo\medsam2_experiments\data\medsam2_npy\train ^
-  -task_name MammoBNP_v1 ^
-  -work_dir C:\path\to\medsam2_experiments\work_dir ^
-  -batch_size 8 ^
-  -num_epochs 100 ^
-  -lr 1e-4 ^
-  -pretrain_model_path C:\path\to\medsam2_experiments\checkpoints\sam2_hiera_tiny.pt ^
-  -model_cfg sam2_hiera_t.yaml
-```
-
-Best weights: `work_dir/MammoBNP_v1-*/medsam_model_best.pth` (upstream naming).
-
-## 6) Inference with fine-tuned weights (Step 4)
-
-```bash
-cd medsam2_experiments
-python inference_finetuned.py --image path\to\case.png --gt-mask path\to\mask.png --cls 1 ^
-  --medsam2-ckpt path\to\medsam_model_best.pth
-```
-
-## 7) Active labeling (Step 5)
-
-Use the **3D Slicer MedSAM2 extension** from the MedSAM2 distribution: box prompts per structure, quick brush fixes, export to your training pool. Rough workflow is described upstream; point the plugin at your fine-tuned checkpoint when available.
-
-## Checklist
-
-- [ ] MedSAM2 repo installed (`pip install -e .`) and `MEDSAM2_REPO` set  
-- [ ] Both checkpoints in `medsam2_experiments/checkpoints/`  
-- [ ] `data/raw_mammo/images` + `masks` with consistent stems and `MASK_CLASS_LABELS`  
-- [ ] `python build_view_map.py` after export (so `view_map.csv` exists — CC/MLO on figures and per-view summary)  
-- [ ] `python prepare_medsam2_data.py --use-project-splits`  
-- [ ] `finetune_sam2_img.py` on `.../medsam2_npy/train`  
-- [ ] Compare val/test Dice zero-shot vs fine-tuned  
-- [ ] (Optional) Slicer plugin + iterative retrain  
-
-## Expectations (rough)
-
-- **Breast tissue**: often strong already with a good box.  
-- **Pectoral (MLO)**: moderate; geometry helps.  
-- **Nipple**: small FOV; zero-shot may be weakest — fine-tune often helps most here.
-
-Adjust `MIN_FG_PIXELS` and `BBOX_PAD_PX` in `config.py` if you skip tiny regions or need tighter boxes.
+[experiments/](experiments/README.md) holds the MedSAM2 data preparation, fine-tuning,
+zero-shot evaluation and a Gradio browser prototype of SAM mode. They are not needed to
+run the toolkit.

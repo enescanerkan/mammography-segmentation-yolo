@@ -1,10 +1,8 @@
-"""In-process launcher for the ported Breast Positioning app.
+"""In-process launcher for the Breast Positioning tool (``qt_app.positioning``).
 
-The positioning code under ``qt_app/positioning/`` uses absolute imports
-(``from gui.main_window import ...``, ``from utils.paths import ...``).
-Those resolve only if ``qt_app/positioning/`` is the first entry on
-``sys.path``. We add it here, then import + return a ``QMainWindow``
-that the toolkit controller can manage like any other annotation window.
+Checks that the two pose models configured under ``positioning.*`` exist, then
+builds and returns the positioning ``QMainWindow`` so the toolkit controller can
+manage it like any other window.
 
 Lifecycle
 ---------
@@ -18,37 +16,21 @@ Lifecycle
 from __future__ import annotations
 
 import logging
-import sys
-from pathlib import Path
 from typing import Callable, Optional
 
-from PyQt5.QtCore import QEvent, QObject, Qt, QTimer
+from PyQt5.QtCore import QEvent, QObject, QTimer
 from PyQt5.QtGui import QKeySequence
 from PyQt5.QtWidgets import QAction, QApplication, QMainWindow, QMenu, QMessageBox
 
 log = logging.getLogger(__name__)
 
-_POSITIONING_ROOT = Path(__file__).resolve().parent / "positioning"
-
-
-def _ensure_on_sys_path() -> None:
-    p = str(_POSITIONING_ROOT)
-    if p not in sys.path:
-        sys.path.insert(0, p)
-
 
 def _check_weights() -> tuple[bool, list[str]]:
-    """Return (ok, missing_names). Importable only after sys.path is set."""
-    try:
-        from utils.weights_downloader import WeightsManager  # type: ignore
-    except Exception:
-        log.exception("Could not import WeightsManager from positioning")
-        return False, ["<import error>"]
-    wm = WeightsManager()
-    if wm.all_weights_exist():
-        return True, []
-    missing = [w.name for w in wm.get_missing_weights()]
-    return False, missing
+    """Return (ok, missing_paths) for the configured MLO / CC pose models."""
+    from .positioning.utils.paths import missing_weights
+
+    missing = [str(p) for p in missing_weights()]
+    return not missing, missing
 
 
 class _PositioningCloseFilter(QObject):
@@ -68,9 +50,8 @@ class _PositioningCloseFilter(QObject):
         self.going_back = False
 
     def eventFilter(self, obj, event):
-        if obj is self.parent() and event.type() == QEvent.Close:
-            if not self.going_back:
-                QTimer.singleShot(0, lambda: QApplication.instance().quit())
+        if obj is self.parent() and event.type() == QEvent.Close and not self.going_back:
+            QTimer.singleShot(0, lambda: QApplication.instance().quit())
         return False  # don't block — let the window's own closeEvent run
 
 
@@ -119,22 +100,21 @@ def launch_positioning_window(
     Returns ``None`` if weights are missing or the import fails; in those
     cases an error dialog is shown to the user.
     """
-    _ensure_on_sys_path()
-
     ok, missing = _check_weights()
     if not ok:
         log.error("Positioning weights missing: %s", missing)
         QMessageBox.critical(
             None,
             "Missing model weights",
-            "Breast Positioning weights are missing under "
-            f"{_POSITIONING_ROOT / 'weights'}.\n\nMissing:\n• "
-            + "\n• ".join(missing),
+            "Breast Positioning needs two YOLO-pose models. Not found:\n• "
+            + "\n• ".join(missing)
+            + "\n\nSet positioning.mlo_weights / positioning.cc_weights in annotation.yaml "
+            "(or $POSITIONING_MLO_WEIGHTS / $POSITIONING_CC_WEIGHTS). See tools/annotation/README.md.",
         )
         return None
 
     try:
-        from gui.main_window import MainApplicationWindow  # type: ignore
+        from .positioning.gui.main_window import MainApplicationWindow
     except Exception:
         log.exception("Failed to import positioning MainApplicationWindow")
         QMessageBox.critical(

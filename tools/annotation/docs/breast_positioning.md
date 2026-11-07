@@ -1,69 +1,64 @@
 # Breast Positioning
 
-YOLO-pose landmark detection for MLO and CC mammography views, with
-distance comparison against a user-configurable threshold (default
-10 mm).
-
-This tool was ported from a standalone PyQt5 app into the toolkit. It
-shares the gradient header and the dark palette with the other tools.
+YOLO-pose landmark detection on an MLO + CC mammography pair, with a distance comparison
+against a user-set threshold (default 10 mm). It shares the toolkit's header and dark theme.
 
 ## When to use it
 
-- You have a paired MLO + CC DICOM study and want a quantitative
-  positioning quality report.
-- You want to QA an existing dataset by walking through detected
-  MLO/CC pairs in a folder.
+- A paired MLO + CC DICOM study needs a quantitative positioning check.
+- A folder of studies should be reviewed pair by pair.
 
 ## Workflow
 
 1. **Pick input**:
-   - **Select DICOM Pair** — choose MLO then CC manually.
-   - **Select Folder** — recursively scans for `.dcm` / `.dicom`,
-     auto-pairs MLO ↔ CC by filename (`mlo` ↔ `cc` swap), and surfaces
-     the count: e.g. `12 pair(s) detected • 3 unpaired`.
-2. **Navigate** detected pairs with **◀ Prev Pair / Next Pair ▶**.
-3. **Run analysis**:
-   - **MLO Analysis** runs the MLO landmark model.
-   - **CC Analysis** runs the CC landmark model.
-   - **Compare** computes pectoral-line ↔ nipple distance for each
-     view and labels the positioning as `GOOD` or `POOR` based on the
-     current threshold.
-4. **Adjust the threshold** with the slider (0.0 — 20.0 mm in 0.5 mm
-   steps). The slider does *not* auto-recompute — press **Compare**
-   again to apply the new value.
-5. **Save**: **Save Results** writes timestamped TXT/CSV/JSON files;
-   **Save Images** writes the rendered visualization PNGs.
+   - **Select DICOM Pair**: choose the MLO file, then the CC file.
+   - **Select Folder**: scans recursively for `.dcm` / `.dicom`, pairs MLO and CC by file
+     name (swapping `mlo` and `cc` must give an existing file) and reports how many pairs
+     and unpaired files were found.
+2. **Navigate** pairs with **◀ Prev Pair / Next Pair ▶**. **↔** swaps the two views if they
+   were loaded the wrong way round.
+3. **Run the analysis**:
+   - **MLO Analysis**: nipple + two pectoral-line points; distance = perpendicular from the
+     nipple to the line through the pectoral points.
+   - **CC Analysis**: nipple; distance = horizontal distance to the chest-wall image edge
+     (the side holding the breast is detected from the image).
+   - **Compare**: difference of the two distances; within the threshold is *correct*, up to
+     1.5 × the threshold *questionable*, above that *incorrect*.
+4. **Adjust the threshold** with the slider (0–20 mm in 0.5 mm steps). It does not
+   re-compare by itself; press **Compare** again.
+5. **Save**: **Save Results** writes time-stamped TXT / CSV / JSON files (including the
+   threshold used); **Save Images** writes the two figures as PNG. Both go to
+   `positioning.results_dir` (default `tools/annotation/results/positioning/`, git-ignored).
 
-The current threshold is included in the saved report header so older
-files remain interpretable.
+Distances use the DICOM `ImagerPixelSpacing` (or `PixelSpacing`) scaled to the model's
+640 × 640 input; 0.085 mm/pixel is assumed when the header has neither.
 
 ## File layout the tool expects
 
-- DICOMs anywhere under the chosen folder. Nested folders are fine.
-- Filenames containing `mlo` and `cc` are paired automatically when
-  swapping one substring for the other yields an existing file. For
-  example `study42_mlo.dcm` + `study42_cc.dcm` becomes one pair.
-- Files without an `mlo` / `cc` token (or with no matching partner)
-  are surfaced as `unpaired` and ignored by the pair navigator. Use
-  the manual `Select DICOM Pair` button to pick them.
+- DICOMs anywhere under the chosen folder; nested folders are fine.
+- Names containing `mlo` and `cc` are paired automatically, e.g. `case01_mlo.dcm` +
+  `case01_cc.dcm`.
+- Files without a partner are listed as *unpaired*; open them with **Select DICOM Pair**.
 
 ## Model weights
 
-The MLO and CC YOLO-pose models live under
-`qt_app/positioning/weights/`:
+Two ultralytics YOLO-pose models, configured as `positioning.mlo_weights` and
+`positioning.cc_weights` (environment variables `POSITIONING_MLO_WEIGHTS` /
+`POSITIONING_CC_WEIGHTS`), by default:
 
-- `mlo-yolo26-pose-advanced.pt`
-- `cc-yolo26-pose-advanced.pt`
+- `weights/positioning/mlo-yolo26-pose-advanced.pt` (keypoints: nipple, pectoral top, pectoral bottom)
+- `weights/positioning/cc-yolo26-pose-advanced.pt` (keypoint: nipple)
 
-If either file is missing, the launcher dialog reports the missing
-name and refuses to start. Replace the file and retry.
+If either file is missing (or smaller than 1 MB, i.e. a broken download), the launcher
+names the missing path and returns to the menu.
+
+This tool measures from **pose landmarks**. The PNL overlay of SAM / Manual mode measures
+from **segmentation masks** with `breast_seg.geometry`; the two are independent methods.
 
 ## Tips
 
-- Each canvas is matplotlib-backed: scroll to zoom, right-click to
-  reset, and drag landmarks to nudge them. The pectoral-line / nipple
-  distance recalculates live as you drag.
-- The Analysis Log shows analysis steps + comparison outcomes. Use
-  `Clear Log` between studies for a clean per-study record.
-- The window has its own **← Back to Toolkit Menu** entry in the File
-  menu (`Ctrl + M`). Closing the X button quits the toolkit.
+- Each canvas is matplotlib-based: scroll to zoom, right-click to reset, drag a landmark
+  to move it; the distance is recomputed live.
+- The Analysis Log records each step and comparison; **Clear Log** between studies.
+- **File → ← Back to Toolkit Menu** (`Ctrl+M`) returns to the launcher; closing the
+  window with ✕ quits the toolkit.

@@ -1,4 +1,4 @@
-"""Gradio UI layer (orchestration only).
+"""Gradio UI for the browser prototype of SAM mode (orchestration only).
 
 This module knows how to:
   - lay out the Gradio Blocks,
@@ -18,8 +18,8 @@ from typing import Optional
 import gradio as gr
 import numpy as np
 
-from .inference import InferencePipeline, InferenceSettings, PredictionResult
-from .prompts import (
+from interactive.inference import InferencePipeline, InferenceSettings, PredictionResult
+from interactive.prompts import (
     TISSUE_PRESETS,
     BoxPrompt,
     PromptState,
@@ -29,10 +29,9 @@ from .prompts import (
     tissue_by_label,
 )
 
-
-MODE_POSITIVE = "Pozitif Nokta (foreground)"
-MODE_IGNORE = "Yoksay Noktası (ignore — hard subtract)"
-MODE_BOX = "Bounding Box (iki tık ile)"
+MODE_POSITIVE = "Positive point (foreground)"
+MODE_IGNORE = "Ignore point (hard subtract)"
+MODE_BOX = "Bounding Box (two clicks)"  # the JS preview matches "Bounding Box"
 
 
 _LIVE_BOX_HEAD = """
@@ -199,22 +198,22 @@ _LIVE_BOX_HEAD = """
 
 
 _HEADER_MD = """\
-# MedSAM2 — İnteraktif Mamografi Segmentasyonu
+# MedSAM2 — interactive mammography segmentation (prototype)
 
-Sol tıklayarak nokta veya bounding box ekle. Maske her tıklamada otomatik güncellenir.
+Left-click to add points or a bounding box. The mask updates after every click.
 
-- **Pozitif Nokta**: dokunun *içine* tıkla. Birden fazla atılabilir.
-- **Yoksay Noktası (ignore)**: bu noktanın etrafı **kesinlikle** maske dışında kalır
-  (R yarıçaplı disk maskeden mekanik çıkarılır + modele soft negatif olarak verilir).
-- **Bounding Box**: *iki tık* ile dikdörtgen çiz. 1) bir köşeye tıkla → büyük sarı
-  X belirir, 2) mouse'u oynat → kutu **canlı önizleme** halinde takip eder
-  (CVAT/labelImg gibi), 3) karşı köşeye tıkla → maske otomatik üretilir.
+- **Positive point**: click *inside* the tissue. Several points are allowed.
+- **Ignore point**: the area around this point is **guaranteed** to stay out of the mask
+  (a disk of radius R is subtracted from the mask and also fed to the model as a soft negative).
+- **Bounding box**: draw a rectangle with *two clicks*. 1) click one corner (a large yellow
+  cross appears), 2) move the mouse (the box follows as a **live preview**), 3) click the
+  opposite corner and the mask is produced.
 
-**Çoklu doku**: her doku tipinde ayrı maske oluştur. Doku tipini değiştirdiğinde
-önceki maske ekrana yapışık kalır; yeni tipte ayrı çizim yaparsın.
-**Model class-agnostic**: doku tipi yalnızca rengi ve class-competition hedefini
-belirler — modele hangi dokuyu istediğini söylemez. Doğru bölgeye işaret etmek
-sana kalmış.
+**Several tissues**: build a separate mask per tissue type. Switching the tissue keeps the
+previous mask on screen; you draw the new tissue separately.
+**The model is class-agnostic**: the tissue type only sets the color and the
+class-competition target; it does not tell the model which tissue you want. Pointing at
+the right region is up to you.
 """
 
 
@@ -281,22 +280,22 @@ def _info_md(
 ) -> str:
     s = _prompts_from_dict(session["prompts"])
     lines = []
-    lines.append(f"**Aktif doku:** {tissue.label}")
-    lines.append(f"**Pozitif noktalar:** {len(s.positive)}")
+    lines.append(f"**Active tissue:** {tissue.label}")
+    lines.append(f"**Positive points:** {len(s.positive)}")
     lines.append(
-        f"**Ignore noktaları:** {len(s.ignore)}  (R = {settings.ignore_radius_px} px → "
-        f"disk başına ~{int(round(3.14159 * settings.ignore_radius_px ** 2))} px)"
+        f"**Ignore points:** {len(s.ignore)}  (R = {settings.ignore_radius_px} px → "
+        f"~{int(round(3.14159 * settings.ignore_radius_px ** 2))} px per disk)"
     )
     box = s.box.to_xyxy()
     if box is not None:
         x0, y0, x1, y1 = (int(v) for v in box.tolist())
         lines.append(
             f"**Box (xyxy):** [{x0}, {y0}, {x1}, {y1}]  "
-            f"({x1 - x0}×{y1 - y0} = {(x1 - x0) * (y1 - y0)} px alan)"
+            f"({x1 - x0}×{y1 - y0} = {(x1 - x0) * (y1 - y0)} px area)"
         )
     elif s.box.first_corner_only():
         lines.append(
-            f"**Box:** ilk köşe ({int(s.box.x0)}, {int(s.box.y0)}) — ikinci tık bekliyor"
+            f"**Box:** first corner ({int(s.box.x0)}, {int(s.box.y0)}), waiting for the second click"
         )
     else:
         lines.append("**Box:** —")
@@ -311,15 +310,15 @@ def _info_md(
             label = preset.label if preset else k
             names.append(f"{label} ({int(m.sum())}px)")
         if names:
-            lines.append("**Kaydedilmiş maskeler:** " + ", ".join(names))
+            lines.append("**Stored masks:** " + ", ".join(names))
 
     if result is None:
-        lines.append("\n*Bu doku için maske henüz yok (en az 1 prompt ekle).*")
+        lines.append("\n*No mask for this tissue yet (add at least one prompt).*")
         return "\n\n".join(lines)
 
     lines.append("")
-    lines.append(f"**Aktif maske pikselleri:** {result.pixel_count:,}")
-    lines.append(f"**SAM skor:** {result.score:.3f}")
+    lines.append(f"**Active mask pixels:** {result.pixel_count:,}")
+    lines.append(f"**SAM score:** {result.score:.3f}")
     if result.used_implicit_box and result.used_box is not None:
         b = result.used_box.astype(int).tolist()
         lines.append(f"**Implicit box:** {b}")
@@ -395,7 +394,7 @@ def build_app(pipeline: InferencePipeline) -> gr.Blocks:
     with gr.Blocks(
         theme=gr.themes.Soft(primary_hue="indigo"),
         css=custom_css,
-        title="MedSAM2 — Mamografi",
+        title="MedSAM2 — Mammography",
         head=_LIVE_BOX_HEAD,
     ) as demo:
         gr.Markdown(_HEADER_MD)
@@ -406,82 +405,82 @@ def build_app(pipeline: InferencePipeline) -> gr.Blocks:
 
         with gr.Row():
             with gr.Column(scale=1, min_width=320):
-                gr.Markdown("### 1) Tıklama Modu")
+                gr.Markdown("### 1) Click mode")
                 mode = gr.Radio(
                     choices=[MODE_POSITIVE, MODE_IGNORE, MODE_BOX],
                     value=MODE_BOX,
-                    label="Sol tık ne yapacak?",
+                    label="What does a left click do?",
                     elem_id="mode_radio",
                 )
 
-                gr.Markdown("### 2) Doku Sınıfı (renk + class-competition)")
+                gr.Markdown("### 2) Tissue class (color + class competition)")
                 tissue_label = gr.Radio(
                     choices=[p.label for p in TISSUE_PRESETS.values()],
                     value=TISSUE_PRESETS["breast"].label,
-                    label="Hangi dokuyu çiziyorsun?",
-                    info="Her doku tipi ayrı maske olarak saklanır. Tipi değiştirsen "
-                         "eski maske kaybolmaz, sadece aktif çizimi sıfırlar.",
+                    label="Which tissue are you drawing?",
+                    info="Each tissue type is stored as its own mask. Switching the type keeps "
+                         "the old mask and only resets the active prompts.",
                 )
 
-                with gr.Accordion("3) Gelişmiş Ayarlar", open=False):
+                with gr.Accordion("3) Advanced settings", open=False):
                     ignore_radius = gr.Slider(
                         minimum=4, maximum=80, step=1, value=20,
-                        label="Ignore disk yarıçapı (px)",
-                        info="Her ignore noktasının etrafından bu yarıçap kadar piksel mekanik silinir.",
+                        label="Ignore disk radius (px)",
+                        info="Pixels within this radius of every ignore point are removed from the mask.",
                     )
                     use_implicit_box = gr.Checkbox(
                         value=True,
-                        label="Implicit box (önerilir)",
-                        info="Box yoksa pozitif noktaların etrafına otomatik kutu türet. "
-                             "Fine-tune dağılımına hizalar.",
+                        label="Implicit box (recommended)",
+                        info="Without a drawn box, derive one around the positive points. "
+                             "Matches the box-only fine-tune distribution.",
                     )
                     use_class_competition = gr.Checkbox(
                         value=True,
-                        label="Class competition (önceden çizilen pectoral'i breast'ten çıkar)",
-                        info="ÖNCE pectoral maskeyi çiz; SONRA breast tissue'ya geçtiğinde "
-                             "üst üste binen pectoral pikselleri otomatik düşürülür. "
-                             "Pectoral çizilmediyse no-op.",
+                        label="Class competition (subtract the drawn pectoral from breast)",
+                        info="Draw the pectoral mask FIRST; when you then switch to breast tissue, "
+                             "overlapping pectoral pixels are removed automatically. "
+                             "No-op when no pectoral mask exists.",
                     )
                     use_soft_negative = gr.Checkbox(
                         value=True,
-                        label="Modele soft negatif besle",
-                        info="Hard subtract zaten yapılır; bu modele de ipucu verir (belt + suspenders).",
+                        label="Also feed ignore points to the model as soft negatives",
+                        info="The hard subtract always runs; this additionally hints the model.",
                     )
 
-                gr.Markdown("### 4) Aksiyonlar")
+                gr.Markdown("### 4) Actions")
                 with gr.Row():
-                    btn_undo_pos = gr.Button("↶ Son pozitif", size="sm")
-                    btn_undo_ign = gr.Button("↶ Son ignore", size="sm")
+                    btn_undo_pos = gr.Button("↶ Last positive", size="sm")
+                    btn_undo_ign = gr.Button("↶ Last ignore", size="sm")
                 with gr.Row():
-                    btn_reset_box = gr.Button("□ Box reset", size="sm")
-                    btn_clear_tissue = gr.Button("⨯ Bu doku maskesini sil", size="sm")
-                btn_clear_all = gr.Button("⨯⨯ TÜM maskeleri temizle", variant="secondary")
-                btn_rerun = gr.Button("⟳ Yeniden tahminle", variant="primary")
+                    btn_reset_box = gr.Button("□ Reset box", size="sm")
+                    btn_clear_tissue = gr.Button("⨯ Clear this tissue", size="sm")
+                btn_clear_all = gr.Button("⨯⨯ Clear ALL masks", variant="secondary")
+                btn_rerun = gr.Button("⟳ Predict again", variant="primary")
 
             with gr.Column(scale=3):
                 with gr.Row():
                     img_input = gr.Image(
-                        label="Görüntü — buraya tıkla",
+                        label="Image (click here)",
                         type="numpy",
                         interactive=True,
                         height=620,
                         elem_id="mammo_input",
                     )
                     img_output = gr.Image(
-                        label="Tahmin (canlı) — tüm maskeler üst üste",
+                        label="Prediction (live), all masks overlaid",
                         type="numpy",
                         interactive=False,
                         height=620,
                         elem_id="mammo_output",
                     )
-                info_md = gr.Markdown("*Henüz görüntü yok.*", elem_classes=["info-panel"])
+                info_md = gr.Markdown("*No image yet.*", elem_classes=["info-panel"])
 
         # --- Event handlers ---------------------------------------------------
 
         def on_new_image(img):
             rgb = ensure_rgb(img)
             session = _empty_session_state()
-            return rgb, session, rgb, None, "*Yeni görüntü yüklendi. Tıklayarak prompt eklemeye başla.*"
+            return rgb, session, rgb, None, "*New image loaded. Click to start adding prompts.*"
 
         img_input.change(
             on_new_image,
@@ -501,11 +500,11 @@ def build_app(pipeline: InferencePipeline) -> gr.Blocks:
             evt: gr.SelectData,
         ):
             if rgb is None:
-                return None, _empty_session_state(), None, "*Önce görüntü yükle.*"
+                return None, _empty_session_state(), None, "*Load an image first.*"
 
             idx = evt.index
             if not (isinstance(idx, (list, tuple)) and len(idx) >= 2):
-                return None, session, None, "*Tıklama koordinatı okunamadı.*"
+                return None, session, None, "*Could not read the click coordinates.*"
             x, y = int(idx[0]), int(idx[1])
 
             state = _prompts_from_dict(session["prompts"])
@@ -528,7 +527,7 @@ def build_app(pipeline: InferencePipeline) -> gr.Blocks:
 
         def on_rerun(rgb, session, tissue_v, ignore_r, implicit_box_v, class_comp_v, soft_neg_v):
             if rgb is None:
-                return None, session, None, "*Önce görüntü yükle.*"
+                return None, session, None, "*Load an image first.*"
             tissue = tissue_by_label(tissue_v)
             settings = _settings_from_inputs(ignore_r, implicit_box_v, class_comp_v, soft_neg_v)
             overlay, session, result = _predict_and_render(rgb, session, tissue, settings, pipeline)
@@ -547,7 +546,7 @@ def build_app(pipeline: InferencePipeline) -> gr.Blocks:
         def on_tissue_change(rgb, session, tissue_v, ignore_r, implicit_box_v, class_comp_v, soft_neg_v):
             """Tissue switched: reset prompts (start fresh for new tissue) but keep all stored masks."""
             if rgb is None:
-                return session, None, None, "*Önce görüntü yükle.*"
+                return session, None, None, "*Load an image first.*"
             session = {"prompts": _empty_prompt_state(), "masks": session.get("masks", {})}
             tissue = tissue_by_label(tissue_v)
             settings = _settings_from_inputs(ignore_r, implicit_box_v, class_comp_v, soft_neg_v)
@@ -565,8 +564,8 @@ def build_app(pipeline: InferencePipeline) -> gr.Blocks:
 
         def on_clear_all(rgb):
             if rgb is None:
-                return _empty_session_state(), None, None, "*Görüntü yok.*"
-            return _empty_session_state(), rgb, None, "*Tüm promptlar ve maskeler temizlendi.*"
+                return _empty_session_state(), None, None, "*No image.*"
+            return _empty_session_state(), rgb, None, "*All prompts and masks cleared.*"
 
         btn_clear_all.click(
             on_clear_all,
@@ -576,7 +575,7 @@ def build_app(pipeline: InferencePipeline) -> gr.Blocks:
 
         def on_clear_tissue(rgb, session, tissue_v, ignore_r, implicit_box_v, class_comp_v, soft_neg_v):
             if rgb is None:
-                return session, None, None, "*Görüntü yok.*"
+                return session, None, None, "*No image.*"
             tissue = tissue_by_label(tissue_v)
             masks = dict(session.get("masks", {}) or {})
             masks.pop(tissue.key, None)
@@ -597,7 +596,7 @@ def build_app(pipeline: InferencePipeline) -> gr.Blocks:
         def _undo_kind(kind: str):
             def _fn(rgb, session, tissue_v, ignore_r, implicit_box_v, class_comp_v, soft_neg_v):
                 if rgb is None:
-                    return session, None, None, "*Görüntü yok.*"
+                    return session, None, None, "*No image.*"
                 state = _prompts_from_dict(session["prompts"])
                 state.pop_last(kind)
                 session = {"prompts": _prompts_to_dict(state), "masks": session.get("masks", {})}

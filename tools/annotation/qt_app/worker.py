@@ -25,7 +25,7 @@ from typing import Mapping, Optional
 import numpy as np
 from PyQt5.QtCore import QMutex, QMutexLocker, QObject, QThread, pyqtSignal
 
-from interactive.inference import InferencePipeline, InferenceSettings, PredictionResult
+from interactive.inference import InferencePipeline, InferenceSettings
 from interactive.prompts import PromptState, TissuePreset
 
 

@@ -10,7 +10,6 @@ Single source of truth: change a constant here, the whole UI follows.
 
 from __future__ import annotations
 
-
 # ─── Base & surface (60%) ──────────────────────────────────────────────
 CANVAS_BG = "#121620"   # deep navy-charcoal (image viewport)
 APP_BG = "#141A24"      # main window background (slightly lighter than canvas)

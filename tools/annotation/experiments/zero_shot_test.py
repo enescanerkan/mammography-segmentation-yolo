@@ -1,22 +1,27 @@
 """
-Zero-shot style segmentation check using Meta **SAM2** (loaded via bowang-lab **MedSAM** repo code: `build_sam2`, `SAM2ImagePredictor`).
+Zero-shot box-prompt check with Meta SAM2 (built through the MedSAM2 code: `build_sam2`,
+`SAM2ImagePredictor`), scored with Dice against raster GT masks.
 
-**Weights (important)**  
-- Default checkpoint is **`sam2_hiera_tiny.pt`** = **SAM2 Hiera Tiny base** (Meta), *not* the separate Hugging Face `MedSAM2_latest.pt` medical bundle unless you pass a compatible `--ckpt`.  
-- So we say **SAM2** for the model family; **MedSAM** here is only the **code/vendor** path (Hydra configs + Python), not automatically “MedSAM2 medical weights”.
+Weights
+    The default checkpoint is `sam2_hiera_tiny.pt`, the SAM2 Hiera-Tiny *base* model, not the
+    Hugging Face `MedSAM2_latest.pt` bundle (pass `--ckpt` or `$MEDSAM2_ZERO_SHOT_CKPT` for that).
+    "MedSAM2" here refers to the code / Hydra configs only.
 
-**Where the box (prompt) comes from — “oracle” box**  
-For each class we load your **GT mask** from the PNG (`gt_mask == class_id`). We take all `True` pixels and compute the **axis-aligned bounding box** (min/max x,y), then add a small padding (`BBOX_PAD_PX`).  
-That rectangle is passed to SAM as the **only geometric prompt** (no text). So the model is *not* told “breast” in words; it only sees **image + box coordinates**.
+Prompt = oracle box
+    For each class the GT mask (`gt_mask == class_id`) gives an axis-aligned bounding box,
+    padded by `BBOX_PAD_PX`. That box is the only prompt. This is a deliberate evaluation setup:
+    "given a box this good, how good is the mask?". It does not test finding the structure
+    without a hint; in use the box comes from a person or a detector.
 
-**Is that a problem?**  
-It is a **deliberate evaluation setup**: “If a user (or detector) drew a box this good around the organ, how good is the mask?” It **does not** test finding the organ without hints. For deployment you would replace the box with a **human box** or **automatic detector**. Dice then measures mask quality given that hint.
+CC / MLO tags
+    If `<data-root>/view_map.csv` exists (`stem,view`, built by `build_view_map.py`), rows and
+    figures carry the view. Copies named `{stem}_flipped` inherit the view of `{stem}`;
+    otherwise `view=?`.
 
-**MLO / CC labels on figures**  
-If `data/raw_mammo/view_map.csv` exists (`stem,view` with `CC` or `MLO`), run `build_view_map.py` from `compare-dataset` paths — overlays show `view=...`. Augmented copies named `{stem}_flipped` inherit the same view as `{stem}`. Otherwise `view=?`.
-
-**Where MLO + full masks come from**  
-Full **pectoral / breast / nipple** polygons live in **`seg-dataset`** → `export_seg_dataset_to_raw_mammo.py`. `compare-dataset/CC|/MLO/labels/*.txt` are often **pose-style** (small pectoral triangle only), not a substitute for full YOLO-seg labels — do not use them for MedSAM GT masks.
+GT source
+    Full pectoral / breast / nipple polygons come from the YOLO-seg dataset via
+    `export_seg_dataset_to_raw_mammo.py`. Pose-style labels (a small pectoral triangle) are not
+    a substitute for segmentation GT.
 """
 
 from __future__ import annotations
@@ -38,7 +43,7 @@ def _ensure_medsam_imports(medsam_repo: Path) -> None:
         raise SystemExit(
             f"MedSAM2 repo not found at {medsam_repo}. "
             "Clone with: git clone -b MedSAM2 https://github.com/bowang-lab/MedSAM.git\n"
-            "Then: set MEDSAM2_REPO to that path or place it at medsam2_experiments/vendor/MedSAM"
+            "Then set medsam2.repo / $MEDSAM2_REPO (default: tools/annotation/vendor/MedSAM)."
         )
     sys.path.insert(0, str(medsam_repo))
 
@@ -188,7 +193,7 @@ def main() -> None:
         "--out-dir",
         type=Path,
         default=None,
-        help="Write metrics.csv + summary.txt here (default: medsam2_experiments/data/zero_shot_output)",
+        help="Write metrics.csv + summary.txt here (default: experiments/data/zero_shot_output)",
     )
     parser.add_argument(
         "--save-vis",
@@ -239,10 +244,10 @@ def main() -> None:
     img_dir = data_root / "images"
     mask_dir = data_root / "masks"
     if not img_dir.is_dir() or not mask_dir.is_dir():
-        raise SystemExit(f"Expected {img_dir} and {mask_dir}. See medsam2_experiments/README.md.")
+        raise SystemExit(f"Expected {img_dir} and {mask_dir}. Run export_seg_dataset_to_raw_mammo.py first.")
 
     if not ckpt.is_file():
-        raise SystemExit(f"Checkpoint missing: {ckpt}. Download sam2_hiera_tiny.pt into medsam2_experiments/checkpoints/ (see README).")
+        raise SystemExit(f"Checkpoint missing: {ckpt}. Download sam2_hiera_tiny.pt and set medsam2.sam2_base (see README).")
 
     print(f"[zero_shot] MEDSAM2_REPO={MEDSAM2_REPO}")
     print(f"[zero_shot] ckpt={ckpt}  ({model_label})  device={device}")

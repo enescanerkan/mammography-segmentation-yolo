@@ -25,7 +25,7 @@ Mouse / keyboard
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+import contextlib
 from typing import Optional
 
 import cv2
@@ -58,17 +58,15 @@ from PyQt5.QtWidgets import (
     QLabel,
 )
 
-from interactive.prompts import TISSUE_PRESETS, BoxPrompt, PromptState
+from interactive.prompts import TISSUE_PRESETS, PromptState
 
 from .image_io import apply_window_level
 from .theme import (
     ACCENT,
     ALERT,
-    SUCCESS,
     TEXT_PRIMARY,
     TISSUE_RGB,
 )
-
 
 # Z layering
 Z_IMAGE = 0
@@ -430,10 +428,8 @@ class MammoCanvas(QGraphicsView):
         the reference and now)."""
         if item is None:
             return
-        try:
+        with contextlib.suppress(RuntimeError):
             self._scene.removeItem(item)
-        except RuntimeError:
-            pass
 
     def reset_window_level(self) -> None:
         self._window = 0.0
@@ -959,12 +955,10 @@ class MammoCanvas(QGraphicsView):
                 global_pos = self.viewport().mapToGlobal(view_pos)
                 self.polygonContextMenuRequested.emit(back_idx, global_pos)
             return
-        if self._mode in (MODE_BOX, MODE_POINT):
-            # SAM-style behavior — manual mode toggles
-            # ``_allow_right_click_ignore`` off so right-click stays
-            # reserved for the context menu there.
-            if self._allow_right_click_ignore:
-                self._add_ignore(x, y)
+        # SAM-style behavior — manual mode toggles ``_allow_right_click_ignore``
+        # off so right-click stays reserved for the context menu there.
+        if self._mode in (MODE_BOX, MODE_POINT) and self._allow_right_click_ignore:
+            self._add_ignore(x, y)
 
     def keyPressEvent(self, event: QKeyEvent) -> None:
         if event.key() == Qt.Key_Escape:
@@ -978,11 +972,14 @@ class MammoCanvas(QGraphicsView):
                 self._clear_box_preview()
                 event.accept()
                 return
-        if event.key() in (Qt.Key_Return, Qt.Key_Enter):
-            if self._mode == MODE_DRAW_POLYGON and len(self._draw_pts) >= 3:
-                self._finish_polygon_draw()
-                event.accept()
-                return
+        if (
+            event.key() in (Qt.Key_Return, Qt.Key_Enter)
+            and self._mode == MODE_DRAW_POLYGON
+            and len(self._draw_pts) >= 3
+        ):
+            self._finish_polygon_draw()
+            event.accept()
+            return
         super().keyPressEvent(event)
 
     # ─── Zoom helpers ──────────────────────────────────────────────────
@@ -1040,8 +1037,10 @@ class MammoCanvas(QGraphicsView):
     def _render_first_corner(self, x: float, y: float) -> None:
         self._clear_first_corner_marker()
         path = QPainterPath()
-        path.moveTo(x - 14, y); path.lineTo(x + 14, y)
-        path.moveTo(x, y - 14); path.lineTo(x, y + 14)
+        path.moveTo(x - 14, y)
+        path.lineTo(x + 14, y)
+        path.moveTo(x, y - 14)
+        path.lineTo(x, y + 14)
         item = QGraphicsPathItem(path)
         pen = QPen(QColor(ACCENT))
         pen.setWidthF(2.0)

@@ -1,8 +1,8 @@
 """
-Box-prompt inference with a fine-tuned MedSAM2 checkpoint (`medsam_model_best.pth`).
+Box-prompt inference with a fine-tuned MedSAM2 checkpoint (`medsam_model_best.pth`) on one image.
 
-Requires MedSAM2 installed and `chdir` to `MEDSAM2_REPO` for `build_sam2`.
-Base SAM2 tiny weights must match the architecture used during fine-tune.
+Uses the toolkit config for the MedSAM2 code, SAM2 base weights and default checkpoint.
+The SAM2 base weights must match the architecture used during the fine-tune.
 """
 
 from __future__ import annotations
@@ -30,16 +30,18 @@ def main() -> None:
     parser.add_argument("--gt-mask", type=Path, default=None, help="Optional PNG; if set, bbox is derived from class id")
     parser.add_argument("--cls", type=int, default=1, help="Class id in mask PNG for bbox derivation")
     parser.add_argument("--bbox", type=str, default=None, help="Override: 'x0,y0,x1,y1' in pixel coords")
-    parser.add_argument("--medsam2-ckpt", type=Path, required=True, help="medsam_model_best.pth from finetune")
+    parser.add_argument("--medsam2-ckpt", type=Path, default=None,
+                        help="Fine-tuned checkpoint (default: medsam2.checkpoint from the toolkit config)")
     parser.add_argument("--sam2-base", type=Path, default=None, help="sam2_hiera_tiny.pt (SAM2 base)")
     parser.add_argument("--out", type=Path, default=None, help="Save binary mask PNG here")
     args = parser.parse_args()
 
-    from config import MEDSAM2_REPO, SAM2_BASE_WEIGHTS, SAM2_MODEL_CFG
+    from config import MEDSAM2_CHECKPOINT, MEDSAM2_REPO, SAM2_BASE_WEIGHTS, SAM2_MODEL_CFG
 
     repo = Path(MEDSAM2_REPO)
     if not (repo / "sam2").is_dir():
-        raise SystemExit("Set MEDSAM2_REPO to a MedSAM2 checkout.")
+        raise SystemExit("Set medsam2.repo / $MEDSAM2_REPO to a MedSAM2 checkout.")
+    medsam2_ckpt = args.medsam2_ckpt or MEDSAM2_CHECKPOINT
 
     sam2_base = args.sam2_base or SAM2_BASE_WEIGHTS
     sys.path.insert(0, str(repo))
@@ -54,8 +56,8 @@ def main() -> None:
 
     if not sam2_base.is_file():
         raise SystemExit(f"Missing SAM2 base weights: {sam2_base}")
-    if not args.medsam2_ckpt.is_file():
-        raise SystemExit(f"Missing fine-tuned checkpoint: {args.medsam2_ckpt}")
+    if not medsam2_ckpt.is_file():
+        raise SystemExit(f"Missing fine-tuned checkpoint: {medsam2_ckpt}")
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     os.chdir(repo)
@@ -64,9 +66,9 @@ def main() -> None:
     finally:
         os.chdir(prev)
 
-    from wrapped_model import MedSAM2, medsam2_segment_from_box
+    from interactive.wrapped_model import MedSAM2, medsam2_segment_from_box
 
-    ckpt = torch.load(args.medsam2_ckpt, map_location=str(device))
+    ckpt = torch.load(medsam2_ckpt, map_location=str(device))
     medsam = MedSAM2(model=sam2_model)
     medsam.load_state_dict(ckpt["model"], strict=True)
     medsam.eval()

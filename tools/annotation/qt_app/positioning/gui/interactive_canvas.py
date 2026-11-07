@@ -2,20 +2,15 @@
 Interactive matplotlib canvas with zoom, pan, and draggable landmarks.
 """
 
+import contextlib
+from typing import Callable, List, Optional, Tuple
+
 import numpy as np
-from typing import Optional, List, Callable, Tuple
-
-import matplotlib
-matplotlib.use('Qt5Agg')
-import matplotlib.pyplot as plt
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
-from matplotlib.patches import Circle
-from matplotlib.lines import Line2D
+from matplotlib.figure import Figure
 from matplotlib.text import Annotation
-
 from PyQt5.QtCore import Qt, pyqtSignal
 from PyQt5.QtWidgets import QSizePolicy
-
 
 LANDMARK_COLORS = {
     'nipple': '#10B981',
@@ -96,7 +91,10 @@ class InteractiveCanvas(FigureCanvas):
     landmarks_changed = pyqtSignal()
 
     def __init__(self, parent=None, facecolor='#22262E'):
-        self.fig, self.ax = plt.subplots(figsize=(10, 10))
+        # A bare Figure (not pyplot) so the canvas owns it and nothing leaks into
+        # pyplot's global figure registry.
+        self.fig = Figure(figsize=(10, 10))
+        self.ax = self.fig.add_subplot(111)
         self.fig.patch.set_facecolor(facecolor)
         self.fig.subplots_adjust(left=0.02, right=0.98, top=0.95, bottom=0.02)
         super().__init__(self.fig)
@@ -180,10 +178,8 @@ class InteractiveCanvas(FigureCanvas):
 
     def _clear_landmarks(self):
         for lm in self.landmarks:
-            try:
+            with contextlib.suppress(Exception):
                 lm.remove()
-            except Exception:
-                pass
         self.landmarks.clear()
 
     # ── Overlay (lines, annotations) ──
@@ -194,10 +190,8 @@ class InteractiveCanvas(FigureCanvas):
 
     def _clear_overlay(self):
         for a in self._overlay_artists:
-            try:
+            with contextlib.suppress(Exception):
                 a.remove()
-            except Exception:
-                pass
         self._overlay_artists.clear()
         self._distance_annotation = None
 

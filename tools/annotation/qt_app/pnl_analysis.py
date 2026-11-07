@@ -1,64 +1,58 @@
-"""PNL / CC-depth geometry for the annotation toolkit.
+"""PNL / CC-depth measurement for the annotation toolkit.
 
-When the user has labelled the anatomical tissues (nipple, pectoral muscle,
-breast) this module turns those masks into the standard positioning
-measurements:
+Turns the tissues labelled on one image (nipple, pectoral muscle, breast) into the
+standard positioning measurements:
 
-* **MLO view** (pectoral present): fit a line along the pectoral-muscle /
-  breast boundary, then drop a perpendicular from the nipple centroid to it.
-  The length of that perpendicular is the **PNL** (Posterior Nipple Line).
-* **CC view** (no pectoral): a horizontal line from the nipple centroid back
-  to the chest-wall edge of the breast tissue — the **CC depth**.
+* **MLO view** (pectoral labelled): the pectoral line is fitted along the
+  pectoral / breast boundary and a perpendicular is dropped from the nipple
+  centroid to it; its length is the **PNL** (posterior nipple line).
+* **CC view** (no pectoral): a horizontal line from the nipple centroid back to the
+  chest-wall edge of the breast tissue, the **CC depth**.
 
-The geometry mirrors ``breast_seg/geometry.py`` (the module that produced the
-``example_mlo.png`` / ``example_cc.png`` reference figures). It is vendored
-here — rather than imported — so the Qt toolkit stays self-contained and
-keeps working when bundled as a stand-alone executable.
+All geometry comes from :mod:`breast_seg.geometry` (pectoral line by the package's
+tangent rule, nipple centroid, PNL foot, CC depth). This module only extracts masks
+from the toolkit's annotation store and packages the result for the canvas overlay.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import List, Optional, Tuple
+from typing import List, Optional
 
 import cv2
 import numpy as np
+
+from toolkit_config import ensure_breast_seg_importable
+
+ensure_breast_seg_importable()
+
+from breast_seg.geometry import (  # noqa: E402  (needs the sys.path fallback above)
+    CCDepthResult,
+    PectoralLine,
+    PNLResult,
+    compute_cc_depth,
+    compute_nipple_centroid,
+    compute_pnl,
+    fit_pectoral_line,
+)
+
+__all__ = [
+    "AnalysisResult",
+    "CCDepthResult",
+    "PNLResult",
+    "PectoralLine",
+    "analyze_annotation",
+    "compute_cc_depth",
+    "compute_nipple_centroid",
+    "compute_pnl",
+    "fit_pectoral_line",
+    "mask_for_tissue",
+]
 
 # Tissue keys as defined in ``interactive.prompts.TISSUE_PRESETS``.
 NIPPLE_KEY = "nipple"
 PECTORAL_KEY = "pectoral"
 BREAST_KEY = "breast"
-
-
-# ── Result containers ─────────────────────────────────────────────────────
-
-
-@dataclass(frozen=True)
-class PectoralLine:
-    point_a: Tuple[int, int]  # (x, y) top
-    point_b: Tuple[int, int]  # (x, y) bottom
-    boundary_points: Tuple[Tuple[int, int], ...] = ()
-
-    @property
-    def direction(self) -> np.ndarray:
-        d = np.array(self.point_b, dtype=float) - np.array(self.point_a, dtype=float)
-        norm = np.linalg.norm(d)
-        return d / norm if norm > 0 else d
-
-
-@dataclass(frozen=True)
-class PNLResult:
-    nipple_center: Tuple[int, int]
-    foot_point: Tuple[int, int]
-    distance_px: float
-
-
-@dataclass(frozen=True)
-class CCDepthResult:
-    nipple_center: Tuple[int, int]
-    edge_point: Tuple[int, int]
-    distance_px: float
-    breast_side: str
 
 
 @dataclass
@@ -78,14 +72,11 @@ class AnalysisResult:
         return self.pnl is not None or self.cc_depth is not None
 
 
-# ── Mask extraction from an ImageAnnotation ───────────────────────────────
-
-
 def mask_for_tissue(ann, tissue_key: str) -> Optional[np.ndarray]:
-    """Return a binary ``H×W`` uint8 mask (0/255) for ``tissue_key``.
+    """Return a binary ``H x W`` uint8 mask (0/255) for ``tissue_key``, or ``None`` if empty.
 
-    Prefers the stored union mask; falls back to rasterising the tissue's
-    polygons so a polygon-only label (not yet rasterised) still works.
+    Combines the stored union mask with the tissue's polygons, so a polygon-only
+    label (not rasterised yet) still counts.
     """
     h, w = ann.image_hw
     out = np.zeros((h, w), dtype=np.uint8)
@@ -94,167 +85,20 @@ def mask_for_tissue(ann, tissue_key: str) -> Optional[np.ndarray]:
     if stored is not None and stored.any():
         out = np.where(stored > 0, np.uint8(255), np.uint8(0))
 
-    polys = ann.polygons.get(tissue_key) or []
-    if polys:
-        for poly in polys:
-            if len(poly) < 3:
-                continue
-            pts = np.array([[int(round(x)), int(round(y))] for x, y in poly], dtype=np.int32)
-            cv2.fillPoly(out, [pts], 255)
+    for poly in ann.polygons.get(tissue_key) or []:
+        if len(poly) < 3:
+            continue
+        pts = np.array([[int(round(x)), int(round(y))] for x, y in poly], dtype=np.int32)
+        cv2.fillPoly(out, [pts], 255)
 
     return out if out.any() else None
 
 
-# ── Pectoral line fitting (mirrors breast_seg/geometry.py) ─────────────────
-
-
-def _find_boundary_edge_points(
-    pectoral_mask: np.ndarray, breast_mask: np.ndarray
-) -> Tuple[List[Tuple[int, int]], bool]:
-    pec_bin = (pectoral_mask > 0).astype(np.uint8)
-
-    rows_with_pec = np.where(pec_bin.any(axis=1))[0]
-    if len(rows_with_pec) < 2:
-        return [], True
-
-    top_row = rows_with_pec[0]
-    bot_row = rows_with_pec[-1]
-
-    pec_coords = np.argwhere(pec_bin > 0)
-    brs_coords = np.argwhere((breast_mask > 0).astype(np.uint8) > 0)
-    if len(pec_coords) == 0 or len(brs_coords) == 0:
-        return [], True
-
-    breast_is_right = brs_coords[:, 1].mean() > pec_coords[:, 1].mean()
-
-    edge_points: List[Tuple[int, int]] = []
-    for row in range(top_row, bot_row + 1):
-        cols_with_pec = np.where(pec_bin[row, :])[0]
-        if len(cols_with_pec) == 0:
-            continue
-        edge_col = cols_with_pec.max() if breast_is_right else cols_with_pec.min()
-        edge_points.append((int(edge_col), int(row)))
-
-    return edge_points, breast_is_right
-
-
-def fit_pectoral_line(
-    pectoral_mask: np.ndarray,
-    breast_mask: np.ndarray,
-    image_shape: Tuple[int, int],
-) -> Optional[PectoralLine]:
-    if pectoral_mask is None or breast_mask is None:
-        return None
-
-    edge_points, breast_is_right = _find_boundary_edge_points(pectoral_mask, breast_mask)
-    if len(edge_points) < 2:
-        return None
-
-    edge_points.sort(key=lambda p: p[1])
-    pt_top = edge_points[0]
-    pt_bot = edge_points[-1]
-
-    pectoral_height = pt_bot[1] - pt_top[1]
-    mid_y = (pt_top[1] + pt_bot[1]) / 2.0
-    threshold = pectoral_height * 0.05
-
-    middle_points = [p for p in edge_points if abs(p[1] - mid_y) <= threshold] or edge_points
-    pt_max = (max if breast_is_right else min)(middle_points, key=lambda p: p[0])
-
-    dx = pt_bot[0] - pt_top[0]
-    dy = pt_bot[1] - pt_top[1]
-    slope_orig = 0.0 if abs(dy) < 1e-6 else float(dx) / float(dy)
-
-    shifted_bot_x = pt_max[0] + slope_orig * (pt_bot[1] - pt_max[1])
-    target_bot_x = (shifted_bot_x + pt_bot[0]) / 2.0
-
-    dy_bot = pt_bot[1] - pt_max[1]
-    slope_new = slope_orig if abs(dy_bot) < 1e-6 else (target_bot_x - pt_max[0]) / dy_bot
-    intercept_new = pt_max[0] - slope_new * pt_max[1]
-
-    h, w = image_shape
-    y_top, y_bot = pt_top[1], pt_bot[1]
-    x_top = int(round(slope_new * y_top + intercept_new))
-    x_bot = int(round(slope_new * y_bot + intercept_new))
-    x_top = max(0, min(w - 1, x_top))
-    x_bot = max(0, min(w - 1, x_bot))
-
-    return PectoralLine(
-        point_a=(x_top, y_top),
-        point_b=(x_bot, y_bot),
-        boundary_points=(pt_top, pt_bot, pt_max),
-    )
-
-
-def compute_nipple_centroid(nipple_mask: np.ndarray) -> Optional[Tuple[int, int]]:
-    if nipple_mask is None:
-        return None
-    moments = cv2.moments((nipple_mask > 0).astype(np.uint8))
-    if moments["m00"] == 0:
-        return None
-    return (int(moments["m10"] / moments["m00"]), int(moments["m01"] / moments["m00"]))
-
-
-def compute_pnl(nipple_center: Tuple[int, int], pectoral_line: PectoralLine) -> PNLResult:
-    P = np.array(nipple_center, dtype=float)
-    A = np.array(pectoral_line.point_a, dtype=float)
-    B = np.array(pectoral_line.point_b, dtype=float)
-
-    AB = B - A
-    ab_dot = np.dot(AB, AB)
-    if ab_dot < 1e-10:
-        return PNLResult(nipple_center, pectoral_line.point_a, float(np.linalg.norm(P - A)))
-
-    t = max(0.0, min(1.0, float(np.dot(P - A, AB) / ab_dot)))
-    foot = A + t * AB
-    return PNLResult(
-        nipple_center=nipple_center,
-        foot_point=(int(round(foot[0])), int(round(foot[1]))),
-        distance_px=float(np.linalg.norm(P - foot)),
-    )
-
-
-def compute_cc_depth(
-    nipple_center: Tuple[int, int],
-    breast_mask: np.ndarray,
-    image_shape: Tuple[int, int],
-) -> Optional[CCDepthResult]:
-    if breast_mask is None:
-        return None
-
-    brs_bin = (breast_mask > 0).astype(np.uint8)
-    h, w = image_shape
-    nx, ny = nipple_center
-
-    brs_coords = np.argwhere(brs_bin > 0)
-    if len(brs_coords) == 0:
-        return None
-
-    breast_side = "right" if brs_coords[:, 1].mean() > w / 2.0 else "left"
-
-    row_band = 10
-    band = brs_bin[max(0, ny - row_band) : min(h, ny + row_band + 1), :]
-    cols_with_breast = np.where(band.any(axis=0))[0]
-    if len(cols_with_breast) == 0:
-        return None
-
-    edge_col = int(cols_with_breast.max()) if breast_side == "right" else int(cols_with_breast.min())
-    return CCDepthResult(
-        nipple_center=nipple_center,
-        edge_point=(edge_col, ny),
-        distance_px=float(abs(edge_col - nx)),
-        breast_side=breast_side,
-    )
-
-
-# ── Top-level entry point ─────────────────────────────────────────────────
-
-
 def analyze_annotation(ann) -> AnalysisResult:
-    """Compute PNL (MLO) or CC depth (CC) from a single image's annotation.
+    """Compute the PNL (MLO) or the CC depth (CC) from one image's annotation.
 
-    View is inferred the same way ``breast_seg`` does it: a labelled pectoral
-    muscle ⇒ MLO, otherwise CC.
+    The view is inferred as in ``breast_seg``: a labelled pectoral muscle means MLO,
+    otherwise CC.
     """
     image_shape = ann.image_hw
 
@@ -264,35 +108,32 @@ def analyze_annotation(ann) -> AnalysisResult:
 
     has_nipple = nipple_mask is not None
     has_pectoral = pectoral_mask is not None
-    is_mlo = has_pectoral
-
-    result = AnalysisResult(is_mlo=is_mlo, has_nipple=has_nipple, has_pectoral=has_pectoral)
+    result = AnalysisResult(is_mlo=has_pectoral, has_nipple=has_nipple, has_pectoral=has_pectoral)
 
     if not has_nipple:
-        result.messages.append("Nipple etiketlenmemiş — ölçüm için meme ucu gerekli.")
+        result.messages.append("Nipple is not labelled; the measurement needs the nipple.")
         return result
 
     nipple_center = compute_nipple_centroid(nipple_mask)
     if nipple_center is None:
-        result.messages.append("Nipple maskesi boş.")
+        result.messages.append("Nipple mask is empty.")
         return result
 
-    if is_mlo:
-        if breast_mask is None:
-            result.messages.append("Breast tissue etiketlenmemiş — pectoral hattı çizilemiyor.")
-            return result
+    if breast_mask is None:
+        what = "the pectoral line" if result.is_mlo else "the CC depth"
+        result.messages.append(f"Breast tissue is not labelled; cannot draw {what}.")
+        return result
+
+    if result.is_mlo:
         line = fit_pectoral_line(pectoral_mask, breast_mask, image_shape)
         if line is None:
-            result.messages.append("Pectoral hattı oturtulamadı.")
+            result.messages.append("Could not fit the pectoral line.")
             return result
         result.pectoral_line = line
         result.pnl = compute_pnl(nipple_center, line)
     else:
-        if breast_mask is None:
-            result.messages.append("Breast tissue etiketlenmemiş — CC derinliği çizilemiyor.")
-            return result
         result.cc_depth = compute_cc_depth(nipple_center, breast_mask, image_shape)
         if result.cc_depth is None:
-            result.messages.append("CC derinliği hesaplanamadı.")
+            result.messages.append("Could not compute the CC depth.")
 
     return result

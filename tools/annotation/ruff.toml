@@ -1,0 +1,7 @@
+# Lint settings for the annotation toolkit: the repository rules (line length 130,
+# rule selection) plus import sorting that knows the toolkit's top-level modules.
+extend = "../../pyproject.toml"
+src = [".", "../../src"]
+
+[lint.isort]
+known-first-party = ["breast_seg", "interactive", "qt_app", "toolkit_config"]

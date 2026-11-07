@@ -126,10 +126,7 @@ class InferencePipeline:
                 excluded_pixels = removed
                 if removed > 0:
                     excluded_by.append("pectoral" if tissue.key == "breast" else "?")
-                    notes.append(
-                        f"Class competition: removed {removed}px "
-                        f"(önceden çizilen pectoral maskesi ile)"
-                    )
+                    notes.append(f"Class competition: removed {removed}px (using the previously drawn pectoral mask)")
 
         ignore_applier = HardIgnoreMask(radius_px=settings.ignore_radius_px)
         if state.ignore:

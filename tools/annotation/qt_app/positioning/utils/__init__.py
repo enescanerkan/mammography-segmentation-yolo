@@ -1,6 +1,5 @@
-"""Utility modules for the application."""
+"""Utility modules for the Breast Positioning tool."""
 
-from .logger import setup_logging, get_logger
-from .weights_downloader import WeightsManager, GoogleDriveDownloader
+from .paths import missing_weights, results_dir, weight_paths
 
-__all__ = ['setup_logging', 'get_logger', 'WeightsManager', 'GoogleDriveDownloader']
+__all__ = ["missing_weights", "results_dir", "weight_paths"]

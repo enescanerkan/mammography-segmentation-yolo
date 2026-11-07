@@ -1,16 +1,16 @@
 # docker compose up --build            -> http://localhost:8000 (this machine only)
 # WEIGHTS_DIR=/path/to/weights docker compose up
-# HOST=0.0.0.0 docker compose up       -> the whole network; the app has no login, put it behind an authenticated proxy
+# POSITIONING_HOST=0.0.0.0 docker compose up -> the whole network; the app has no login, put it behind an authenticated proxy
 services:
   positioning:
     build: .
     image: mammography-segmentation:cpu
     ports:
-      - "${HOST:-127.0.0.1}:${PORT:-8000}:8000"
+      - "${POSITIONING_HOST:-127.0.0.1}:${POSITIONING_PORT:-8000}:8000"
     volumes:
       - ${WEIGHTS_DIR:-./weights}:/weights:ro
       - positioning-data:/data
-    restart: unless-stopped
+    restart: on-failure:3
 
 volumes:
   positioning-data:

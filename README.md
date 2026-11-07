@@ -70,7 +70,7 @@ docker compose up --build            # http://localhost:8000
 WEIGHTS_DIR=/path/to/weights docker compose up
 ```
 
-The port is bound to this machine only; `HOST=0.0.0.0 docker compose up` opens it to the network, which needs an
+The port is bound to this machine only; `POSITIONING_HOST=0.0.0.0 docker compose up` opens it to the network, which needs an
 authenticated proxy in front (the app has no login). Studies are kept in the `positioning-data` volume. Uploaded DICOM files are never written to disk: only the
 display renders and the label JSON are stored, and they expire after 30 days by default.
 

@@ -1,116 +1,49 @@
-"""YOLO segmentation model wrapper following Single Responsibility Principle."""
+"""YOLO segmentation model wrapper for inference (training goes through :mod:`breast_seg.training`)."""
+from __future__ import annotations
 
 from pathlib import Path
-from typing import List, Optional
-
-import torch
-from ultralytics import YOLO
+from typing import Any, List, Optional, Union
 
 from breast_seg.config import Config
 
 
 class SegmentationModel:
-    """Wrapper around YOLO for breast segmentation tasks.
+    """Lazy ``ultralytics.YOLO`` wrapper: load on first use, predict with the :class:`Config` defaults."""
 
-    Responsibilities: model loading, training, and inference only.
-    """
+    def __init__(self, config: Optional[Config] = None, weights: Optional[Union[str, Path]] = None):
+        self._config = config or Config()
+        self._weights = Path(weights) if weights else self._config.weights_path
+        self._model: Any = None
 
-    def __init__(self, config: Config, weights: Optional[Path] = None):
-        """Load a YOLO segmentation model.
+    @property
+    def weights(self) -> Optional[Path]:
+        return self._weights
 
-        Args:
-            config: Project configuration.
-            weights: Path to model weights. If None, uses config.weights_path
-                     for inference or config.model_name for training.
-        """
-        self._config = config
-        self._weights = weights
-        self._model: Optional[YOLO] = None
+    def _load(self) -> Any:
+        if self._model is None:
+            if self._weights is None:
+                raise ValueError("no segmentation weights given (argument, Config.weights_path or BREAST_SEG_SEG_WEIGHTS)")
+            from ultralytics import YOLO
 
-    def _load(self, weights_path: Path) -> YOLO:
-        """Lazy load the YOLO model."""
-        if self._model is None or self._weights != weights_path:
-            self._weights = weights_path
-            self._model = YOLO(str(weights_path))
+            self._model = YOLO(str(self._weights))
         return self._model
 
-    def train(self) -> None:
-        """Train the segmentation model using settings from config."""
-        model = self._load(Path(self._config.model_name))
+    @property
+    def model(self) -> Any:
+        """The underlying ``ultralytics.YOLO`` object."""
+        return self._load()
+
+    def predict(self, source: Union[str, Path, Any], **overrides: Any) -> List[Any]:
+        """Ultralytics ``predict`` with the configured image size, thresholds and device; ``overrides`` win."""
         cfg = self._config
+        kwargs = dict(imgsz=cfg.image_size, conf=cfg.confidence_threshold, iou=cfg.iou_threshold, device=cfg.device,
+                      retina_masks=True, verbose=False)
+        kwargs.update(overrides)
+        return self._load().predict(source=str(source) if isinstance(source, Path) else source, **kwargs)
 
-        if torch.cuda.is_available():
-            # Stability: benchmark=True + AMP can trigger cuDNN errors on some setups.
-            torch.backends.cudnn.benchmark = False
+    @staticmethod
+    def train(config_path: Union[str, Path], overrides: Optional[List[str]] = None) -> Any:
+        """Train with a ``configs/train/*.yaml`` recipe (see :func:`breast_seg.training.build_trainer`)."""
+        from breast_seg.training import build_trainer
 
-        model.train(
-            data=str(cfg.data_yaml),
-            epochs=cfg.epochs,
-            imgsz=cfg.image_size,
-            batch=cfg.batch_size,
-            patience=cfg.patience,
-            device=cfg.device,
-            workers=cfg.workers,
-            amp=cfg.use_amp,
-            deterministic=False,
-            project=str(cfg.runs_dir),
-            name=cfg.run_name,
-            exist_ok=True,
-            # Augmentation
-            # Horizontal flips are prebuilt in the dataset; disable Ultralytics fliplr.
-            flipud=0.0,
-            fliplr=0.0,
-            mosaic=0.5,
-            degrees=5.0,
-            translate=0.1,
-            scale=0.3,
-            # Optimizer
-            optimizer="AdamW",
-            lr0=0.001,
-            lrf=0.01,
-            warmup_epochs=3,
-            # Segmentation
-            overlap_mask=True,
-            mask_ratio=4,
-            # Output
-            verbose=True,
-            save=True,
-            save_period=10,
-            plots=True,
-        )
-        print(f"\n[INFO] Training complete. Results saved to: {cfg.runs_dir}")
-
-    def predict(self, source: Path, **overrides) -> List:
-        """Run segmentation inference.
-
-        Args:
-            source: Path to images directory or single image.
-            **overrides: Additional YOLO predict kwargs.
-
-        Returns:
-            List of ultralytics Results objects.
-        """
-        weights = self._weights or self._config.weights_path
-        model = self._load(weights)
-        cfg = self._config
-
-        default_kwargs = dict(
-            source=str(source),
-            imgsz=cfg.image_size,
-            conf=cfg.confidence_threshold,
-            iou=cfg.iou_threshold,
-            device=cfg.device,
-            save=True,
-            save_txt=True,
-            save_conf=True,
-            project=str(cfg.base_dir),
-            name="predictions",
-            exist_ok=True,
-            retina_masks=True,
-            show_boxes=False,
-            show_labels=True,
-            show_conf=True,
-            line_width=2,
-        )
-        default_kwargs.update(overrides)
-        return model.predict(**default_kwargs)
+        return build_trainer(config_path, overrides=overrides).fit()

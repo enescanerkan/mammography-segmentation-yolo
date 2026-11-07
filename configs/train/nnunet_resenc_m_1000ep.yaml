@@ -1,0 +1,8 @@
+# The same nnU-Net with its own default schedule length (1000 epochs).
+base: nnunet_resenc_m.yaml
+name: nnunet_resenc_m_1000ep
+description: nnU-Net ResEnc-M, full-image patch, 1000 epochs, v4 data
+trainer: nnUNetTrainerMammo_1000epochs
+npz: true
+export:
+  filename: nnunet_resenc_m_1000ep_fold0.zip

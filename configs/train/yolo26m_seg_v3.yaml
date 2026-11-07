@@ -1,0 +1,8 @@
+# YOLO26m-seg v3: shared recipe (150 epochs, patience 30) on dataset generation v3.
+base: _yolo_seg_base.yaml
+name: breast_seg_v3_yolo26m
+description: YOLO26m-seg on seg-dataset_v3
+data:
+  dataset_dir: ${data_root}/seg-dataset_v3
+export:
+  filename: breast_seg_v3_yolo26m.pt

@@ -1,0 +1,51 @@
+# Shared YOLO segmentation recipe (dataset generations v2-v5 and the benchmark backbones).
+# Anatomy-safe geometry: horizontal flip on, vertical flip off (the pectoral muscle is always at the top of an MLO
+# view); grey images, so only the brightness channel of the HSV jitter is used. Pixel-level Albumentations
+# transforms replace Ultralytics' default list (the "Albumentations patch").
+family: yolo_seg
+seed: 42
+device: "0"
+workers: 8
+model: yolo26m-seg.pt
+data:
+  names: [pectoral, breast-tissue, nipple]
+hyp:
+  epochs: 150
+  patience: 30
+  batch: 16
+  imgsz: 640
+  optimizer: AdamW
+  lr0: 0.001
+  amp: true
+  degrees: 8.0
+  translate: 0.05
+  scale: 0.2
+  fliplr: 0.5
+  flipud: 0.0
+  hsv_h: 0.0
+  hsv_s: 0.0
+  hsv_v: 0.3
+  mosaic: 0.5
+  close_mosaic: 15
+  mixup: 0.0
+  copy_paste: 0.0
+  save_period: -1
+  plots: true
+albumentations:
+  enabled: true
+  transforms:
+    - {name: CLAHE, clip_limit: [1, 4], p: 0.25}
+    - {name: RandomBrightnessContrast, brightness_limit: 0.2, contrast_limit: 0.25, p: 0.4}
+    - {name: RandomGamma, gamma_limit: [80, 120], p: 0.2}
+    - {name: GaussNoise, p: 0.2}
+    - {name: ISONoise, p: 0.12}
+    - {name: MultiplicativeNoise, multiplier: [0.9, 1.1], per_channel: false, p: 0.12}
+    - {name: SaltAndPepper, p: 0.12}
+    - {name: Blur, blur_limit: 3, p: 0.08}
+    - {name: MedianBlur, blur_limit: 3, p: 0.08}
+    - {name: Sharpen, alpha: [0.1, 0.3], p: 0.1}
+predict:
+  conf: 0.25
+  floor: 0.01
+  imgsz: 640
+  batch: 16

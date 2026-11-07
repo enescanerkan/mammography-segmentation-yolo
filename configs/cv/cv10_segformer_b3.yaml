@@ -1,0 +1,6 @@
+# SegFormer-B3, main recipe; patience 300 = no early stopping. Prediction with horizontal-flip TTA.
+base: _cv10_base.yaml
+name: cv10_segformer_b3
+train_config: ../train/segformer_b3.yaml
+overrides:
+  optim.patience: 300

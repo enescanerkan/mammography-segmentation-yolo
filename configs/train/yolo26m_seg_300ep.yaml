@@ -1,0 +1,11 @@
+# Benchmark baseline: the v4 recipe with a longer schedule (300 epochs, patience 50); nothing else changes.
+base: _yolo_seg_base.yaml
+name: yolo26m_seg_300ep
+description: YOLO26m-seg, v4 data, 300-epoch schedule
+data:
+  dataset_dir: ${data_root}/seg-dataset_v4
+hyp:
+  epochs: 300
+  patience: 50
+export:
+  filename: yolo26m_seg_300ep.pt

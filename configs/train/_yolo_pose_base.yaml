@@ -1,0 +1,36 @@
+# Landmark (pose) models: one "Breast" box per image whose keypoints are the landmarks. Trained on the
+# wavelet-enhanced 640 canvases (NLM denoising, Daubechies-4 level-2 detail boost, CLAHE; the `wavelet640`
+# preprocessing recipe). Hyper-parameters as stored in the released checkpoints; Ultralytics turns horizontal
+# flipping off for keypoint data without a flip_idx, so fliplr is 0 here explicitly.
+family: yolo_pose
+seed: 0
+device: "0"
+workers: 8
+model: yolo26l-pose.pt
+data:
+  names: [Breast]
+hyp:
+  epochs: 300
+  patience: 50
+  batch: 26
+  imgsz: 640
+  optimizer: auto
+  lr0: 0.01
+  lrf: 0.01
+  warmup_epochs: 3.0
+  amp: true
+  degrees: 0.0
+  translate: 0.1
+  scale: 0.5
+  fliplr: 0.0
+  flipud: 0.0
+  hsv_h: 0.015
+  hsv_s: 0.7
+  hsv_v: 0.4
+  mosaic: 1.0
+  close_mosaic: 10
+  mixup: 0.0
+  copy_paste: 0.0
+predict:
+  conf: 0.25
+  imgsz: 640

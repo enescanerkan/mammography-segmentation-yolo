@@ -1,0 +1,67 @@
+# seg-dataset_v5 = seg-dataset_v4 + completed public / external images, all added to train. v4's train / val /
+# test are kept exactly, so v5 models are compared with v4 models on the same validation and test images.
+#
+# Taken from the completion manifest, whose column and bucket names are kept as the completion tool writes them
+# (grup = patient / series group, src = source dataset, kova = bucket; insan = every class human-annotated,
+# otomatik = model-completed with every rule passed): only the insan and otomatik buckets, and every new image
+# must carry all classes of its view (a missing class would be taught as background). Leakage rules:
+#   - the external EMBED test images never enter, nor any other image of the same patients;
+#   - no new train image may share a study (v4 images re-added from the pool) or a series (Mendeley / VinDr
+#     images; series is the closest available proxy of a study there) with v4 val / test.
+# Note: images of the public sets used here are training data of v5 and can no longer serve as its external test.
+name: seg-dataset_v5
+description: seg-dataset_v4 plus completed public / external images in train
+output_dir: ${data_root}/seg-dataset_v5
+class_names: [pectoral, breast-tissue, nipple]
+groups:
+  - csv: ["${mlo_labels}", "${cc_labels}"]
+    key: SOPInstanceUID
+    group: StudyInstanceUID
+    namespace: study
+  - csv: ["${vindr_metadata}"]
+    key: SOP Instance UID
+    group: Series Instance UID
+    namespace: series
+sources:
+  - name: v4
+    type: yolo_layout
+    root: ${data_root}/seg-dataset_v4
+    split: inherit
+    view_prefixes: {cc_: CC}
+  - name: completion
+    type: manifest
+    manifest: ${completion_dir}/meta.csv
+    columns: {key: id, view: view, group: grup, source: src, bucket: kova}
+    include: {kova: [insan, otomatik]}
+    image_template: "{root}/{kova}/images/{src}_{id}.png"
+    label_template: "{root}/{kova}/labels/{src}_{id}.txt"
+    stem_template: "{src}_{id}"
+    stem_by_source: {v4eksik: "{id}"}
+    view_prefix: {CC: cc_}
+    split: train
+    strict_classes: true
+    group_namespace: patient
+    group_namespace_by_source: {mendeley: series}
+    exclude:
+      - csv: ${embed_test_csv}
+        column: sop
+        where: {src: [embed]}
+        drop_same_group: true
+        require_group: true
+audit:
+  image_shape: [640, 640]
+  unique_pixels: true
+  require_breast: true
+  forbid_cc_pectoral: true
+  required_classes: {MLO: [0, 1, 2], CC: [1, 2]}
+  leakage: true
+exports:
+  semantic:
+    enabled: true
+    output_dir: ${data_root}/semantic_v5
+  nnunet:
+    enabled: true
+    dataset_id: 602
+    dataset_name: BreastSegV5
+    cv_folds: 0
+    description: "seg-dataset_v5: v4 plus completed public / external images in train; v4 val / test unchanged"

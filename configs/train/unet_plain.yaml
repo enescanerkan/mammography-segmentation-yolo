@@ -1,0 +1,13 @@
+# Plain U-Net from scratch (reference baseline without attention or residual blocks). Single-channel [0, 1] input
+# (no ImageNet statistics) and a learning rate suited to a randomly initialised CNN.
+base: _semantic_base.yaml
+family: unet
+name: unet_plain
+description: Plain U-Net (base width 64), v4 data
+base_channels: 64
+in_channels: 1
+optim:
+  batch: 8
+  lr: 1.0e-3
+export:
+  filename: unet_plain.pt

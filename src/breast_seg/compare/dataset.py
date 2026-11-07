@@ -1,12 +1,21 @@
+"""The compare dataset: label tables, canvas metadata and MLO/CC pairing of one split.
+
+Layout of ``compare_root``::
+
+    labels/mlo_labels.csv, labels/cc_labels.csv     reference annotations (see breast_seg.evaluation.gt)
+    MLO/metadata.csv, CC/metadata.csv               canvas transform + pixel spacing per image (sop_uid)
+    MLO/images/<split>/<sop>.png, CC/images/...     640 canvases
+    test_dicom/<study>/<sop>.dicom                  optional originals for the visualisations
 """
-SOLID OOP: Dataset Management and Data Loaders
-"""
-import ast
+from __future__ import annotations
+
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 import pandas as pd
+
+from breast_seg.evaluation.gt import cc_nipples, mlo_landmarks, quality_labels
 
 
 @dataclass(frozen=True)
@@ -17,129 +26,75 @@ class TestPair:
     mlo_sop: str
 
 
+def _side(desc: str, view: str) -> Optional[str]:
+    s = str(desc)
+    for lat in ("L", "R"):
+        if f"{lat}-{view}" in s:
+            return lat
+    return None
+
+
 class MammographyDataset:
-    """Manages loading and pairing MLO and CC test splits."""
-    def __init__(self, labels_dir: Path, cc_dir: Path, mlo_dir: Path):
-        self.labels_dir = labels_dir
-        self.cc_dir = cc_dir
-        self.mlo_dir = mlo_dir
-        
-        self.cc_labels = pd.read_csv(self.labels_dir / "cc_labels.csv")
-        self.mlo_labels = pd.read_csv(self.labels_dir / "mlo_labels.csv")
-        self.cc_meta = pd.read_csv(self.cc_dir / "metadata.csv")
-        self.mlo_meta = pd.read_csv(self.mlo_dir / "metadata.csv")
+    """Loads the tables once; pairs the CC and MLO image of the same study and side."""
+
+    def __init__(self, labels_dir: Path, cc_dir: Path, mlo_dir: Path, split: str = "Test"):
+        self.labels_dir, self.cc_dir, self.mlo_dir, self.split = Path(labels_dir), Path(cc_dir), Path(mlo_dir), split
+        self.cc_labels = pd.read_csv(self.labels_dir / "cc_labels.csv", dtype={"SOPInstanceUID": str, "StudyInstanceUID": str})
+        self.mlo_labels = pd.read_csv(self.labels_dir / "mlo_labels.csv", dtype={"SOPInstanceUID": str, "StudyInstanceUID": str})
+        self.cc_meta = pd.read_csv(self.cc_dir / "metadata.csv", dtype={"sop_uid": str}).set_index("sop_uid")
+        self.mlo_meta = pd.read_csv(self.mlo_dir / "metadata.csv", dtype={"sop_uid": str}).set_index("sop_uid")
+        self._mlo_gt = mlo_landmarks(self.mlo_labels)
+        self._cc_gt = cc_nipples(self.cc_labels)
+        self._cc_quality = quality_labels(self.cc_labels[self.cc_labels["labelName"] == "Nipple"])
+        self._mlo_quality = quality_labels(self.mlo_labels)
+
+    @classmethod
+    def from_root(cls, compare_root: Path, split: str = "Test") -> MammographyDataset:
+        root = Path(compare_root)
+        return cls(root / "labels", root / "CC", root / "MLO", split)
 
     def get_test_pairs(self, limit: int = 0) -> List[TestPair]:
-        cc_t = self.cc_labels[self.cc_labels["Split"] == "Test"].copy()
-        mlo_t = self.mlo_labels[self.mlo_labels["Split"] == "Test"].copy()
-        
-        def _lat_cc(desc: str) -> Optional[str]:
-            s = str(desc)
-            if "L-CC" in s or s.strip() == "L-CC": return "L"
-            if "R-CC" in s or s.strip() == "R-CC": return "R"
-            return None
-            
-        def _lat_mlo(desc: str) -> Optional[str]:
-            s = str(desc)
-            if "L-MLO" in s: return "L"
-            if "R-MLO" in s: return "R"
-            return None
-
-        cc_t["_lat"] = cc_t["SeriesDescription"].map(_lat_cc)
-        mlo_t["_lat"] = mlo_t["SeriesDescription"].map(_lat_mlo)
-
+        cc = self.cc_labels[self.cc_labels["Split"] == self.split].copy()
+        mlo = self.mlo_labels[self.mlo_labels["Split"] == self.split].copy()
+        cc["_lat"] = cc["SeriesDescription"].map(lambda d: _side(d, "CC"))
+        mlo["_lat"] = mlo["SeriesDescription"].map(lambda d: _side(d, "MLO"))
         pairs: List[TestPair] = []
-        for _, r in cc_t.iterrows():
-            st = str(r["StudyInstanceUID"])
-            lat = r["_lat"]
-            if lat is None:
+        for _, r in cc.iterrows():
+            if r["_lat"] is None:
                 continue
-                
-            m = mlo_t[(mlo_t["StudyInstanceUID"] == st) & 
-                      (mlo_t["_lat"] == lat) & 
-                      (mlo_t["labelName"] == "Nipple")]
-            if len(m) == 0:
-                continue
-                
-            pairs.append(
-                TestPair(
-                    study_uid=st,
-                    laterality=lat,
-                    cc_sop=str(r["SOPInstanceUID"]),
-                    mlo_sop=str(m.iloc[0]["SOPInstanceUID"]),
-                )
-            )
-            
-        if limit > 0:
-            pairs = pairs[:limit]
-        return pairs
+            m = mlo[(mlo["StudyInstanceUID"] == r["StudyInstanceUID"]) & (mlo["_lat"] == r["_lat"])
+                    & (mlo["labelName"] == "Nipple")]
+            if len(m):
+                pairs.append(TestPair(str(r["StudyInstanceUID"]), r["_lat"], str(r["SOPInstanceUID"]),
+                                      str(m.iloc[0]["SOPInstanceUID"])))
+        return pairs[:limit] if limit > 0 else pairs
 
-    def get_cc_metadata(self, sop_uid: str) -> Optional[pd.Series]:
-        m = self.cc_meta[self.cc_meta["sop_uid"].astype(str) == str(sop_uid)]
-        return m.iloc[0] if not m.empty else None
-
-    def get_mlo_metadata(self, sop_uid: str) -> Optional[pd.Series]:
-        m = self.mlo_meta[self.mlo_meta["sop_uid"].astype(str) == str(sop_uid)]
-        return m.iloc[0] if not m.empty else None
-
-    def get_mlo_gt_keypoints(self, sop_uid: str) -> Optional[Dict[str, Tuple[float, float]]]:
-        rows = self.mlo_labels[self.mlo_labels["SOPInstanceUID"].astype(str) == str(sop_uid)]
-        if rows.empty:
+    @staticmethod
+    def _row(meta: pd.DataFrame, sop: str) -> Optional[pd.Series]:
+        if sop not in meta.index:
             return None
-            
-        keypoints: Dict[str, Tuple[float, float]] = {}
-        for _, row in rows.iterrows():
-            label = str(row.get("labelName", "")).strip()
-            raw = row.get("data", "")
-            if pd.isna(raw): continue
-            
-            try:
-                data = ast.literal_eval(str(raw))
-            except (ValueError, SyntaxError):
-                continue
-                
-            if label == "Nipple":
-                keypoints["nipple"] = (float(data["x"] + data["width"] / 2), float(data["y"] + data["height"] / 2))
-            elif label == "Pectoralis":
-                raw_pts = data.get("vertices", [])
-                if not raw_pts: continue
-                try:
-                    pts = [(float(p[0]), float(p[1])) for p in raw_pts]
-                except (IndexError, TypeError, ValueError):
-                    continue
-                if len(pts) < 2: continue
-                by_y = sorted(pts, key=lambda p: p[1])
-                keypoints["pectoral_top"] = (by_y[0][0], by_y[0][1])
-                keypoints["pectoral_bottom"] = (by_y[-1][0], by_y[-1][1])
-                
-        if not {"nipple", "pectoral_top", "pectoral_bottom"}.issubset(keypoints):
-            return None
-        return keypoints
+        row = meta.loc[sop]
+        row = (row.iloc[0] if isinstance(row, pd.DataFrame) else row).copy()
+        row["sop_uid"] = sop
+        return row
 
-    def get_cc_gt_nipple(self, sop_uid: str) -> Optional[Tuple[float, float]]:
-        rows = self.cc_labels[(self.cc_labels["SOPInstanceUID"].astype(str) == str(sop_uid)) & 
-                              (self.cc_labels["labelName"] == "Nipple")]
-        if rows.empty: return None
-        raw = rows.iloc[0].get("data", "")
-        if pd.isna(raw): return None
-        try:
-            data = ast.literal_eval(str(raw))
-            return (float(data["x"] + data["width"] / 2), float(data["y"] + data["height"] / 2))
-        except (ValueError, SyntaxError):
-            return None
+    def get_cc_metadata(self, sop: str) -> Optional[pd.Series]:
+        return self._row(self.cc_meta, str(sop))
 
-    def get_qualitative_label(self, sop_uid: str, view: str) -> Optional[str]:
-        if view.upper() == "CC":
-            rows = self.cc_labels[(self.cc_labels["SOPInstanceUID"].astype(str) == str(sop_uid)) & 
-                                  (self.cc_labels["labelName"] == "Nipple")]
-            if not rows.empty and not pd.isna(rows.iloc[0].get("qualitativeLabel", "")):
-                return str(rows.iloc[0].get("qualitativeLabel", "")).strip()
-        else:
-            rows = self.mlo_labels[self.mlo_labels["SOPInstanceUID"].astype(str) == str(sop_uid)]
-            if not rows.empty:
-                for col in ("qualitativeLabel", "quality", "labelQuality"):
-                    if col in rows.columns:
-                        for v in rows[col].values:
-                            if pd.notna(v) and str(v).strip() and str(v).strip().lower() not in ("nan", "none"):
-                                return str(v).strip()
-        return None
+    def get_mlo_metadata(self, sop: str) -> Optional[pd.Series]:
+        return self._row(self.mlo_meta, str(sop))
+
+    def get_mlo_gt_keypoints(self, sop: str) -> Optional[Dict[str, Tuple[float, float]]]:
+        """``{"nipple", "pectoral_top", "pectoral_bottom"}`` in original coordinates, or ``None``."""
+        d = self._mlo_gt.get(str(sop))
+        if d is None:
+            return None
+        return {"nipple": tuple(map(float, d["nipple"])), "pectoral_top": tuple(map(float, d["pec_top"])),
+                "pectoral_bottom": tuple(map(float, d["pec_bot"]))}
+
+    def get_cc_gt_nipple(self, sop: str) -> Optional[Tuple[float, float]]:
+        p = self._cc_gt.get(str(sop))
+        return None if p is None else (float(p[0]), float(p[1]))
+
+    def get_qualitative_label(self, sop: str, view: str) -> Optional[str]:
+        return (self._cc_quality if view.upper() == "CC" else self._mlo_quality).get(str(sop))

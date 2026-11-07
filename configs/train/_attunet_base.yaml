@@ -1,0 +1,11 @@
+# Attention U-Net + CoordConv with a soft-argmax landmark head. Early stopping on the validation landmark error
+# for both arms, so the comparison of the arms isolates the segmentation loss.
+base: _semantic_base.yaml
+family: attunet
+base_channels: 64
+keypoints: [nipple, pec_top, pec_bot]
+landmarks_csv: ${data_root}/semantic_v4/landmarks_canvas.csv
+w_lm: 20.0
+optim:
+  batch: 8
+  lr: 1.0e-3

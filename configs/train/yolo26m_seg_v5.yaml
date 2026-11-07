@@ -1,0 +1,9 @@
+# YOLO26m-seg v5: the 300-epoch benchmark recipe on seg-dataset_v5 (v4 + completed public / external images,
+# all added to train; val and test identical to v4).
+base: yolo26m_seg_300ep.yaml
+name: yolo26m_v5_300ep
+description: YOLO26m-seg on seg-dataset_v5, 300-epoch schedule
+data:
+  dataset_dir: ${data_root}/seg-dataset_v5
+export:
+  filename: yolo26m_seg_v5.pt

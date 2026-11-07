@@ -1,0 +1,12 @@
+# SegFormer-B3 (MiT-B3 encoder, ImageNet pre-trained): cross-entropy + soft Dice, AdamW, polynomial decay,
+# early stopping on the validation mean foreground Dice. Grey input repeated to three ImageNet-normalised channels.
+base: _semantic_base.yaml
+family: segformer
+name: segformer_b3
+description: SegFormer-B3 semantic segmentation, v4 data
+backbone: nvidia/mit-b3
+optim:
+  batch: 16
+  lr: 6.0e-5
+export:
+  filename: segformer_b3

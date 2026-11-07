@@ -1,0 +1,35 @@
+# Local paths: copy to configs/paths.yaml (git-ignored) and edit. Every committed config refers to these entries
+# as ${name}. Relative values are resolved against `root`; `root` itself is relative to this file.
+# Point another file at the tools with the BREAST_SEG_PATHS environment variable.
+root: ..                                  # repository root
+
+data_root: data                           # built datasets (seg-dataset_v4, semantic_v4, pose and lesion sets)
+runs_dir: runs                            # training runs (<runs_dir>/<config name>)
+weights_dir: weights                      # base weights (yolo26m-seg.pt ...) and exported models
+predictions_dir: outputs/predictions      # label maps written by predict / cross-validation
+results_dir: outputs/results              # evaluation tables
+nnunet_raw: data/nnunet/raw
+nnunet_preprocessed: data/nnunet/preprocessed   # put it on a fast local disk: nnU-Net reads it every iteration
+nnunet_results: data/nnunet/results
+
+extra:
+  # reference annotation tables of the internal cohort (one row per annotation; see docs/EVALUATION.md)
+  mlo_labels: data/labels/mlo_labels.csv
+  cc_labels: data/labels/cc_labels.csv
+  # per-image preprocessing metadata (crop / scale / padding / pixel spacing / laterality) of the 640 canvases
+  mlo_metadata: data/canvas/MLO/metadata.csv
+  cc_metadata: data/canvas/CC/metadata.csv
+  # DICOM header table with image and series UIDs (series-level leakage check of seg_v5)
+  vindr_metadata: data/labels/metadata.csv
+  # raw annotation pools (640 canvases + YOLO polygons)
+  mlo_label_pool: data/label_pool/MLO
+  cc_label_pool: data/label_pool/CC
+  cc_pseudo_labels: data/label_pool/CC_pseudo/labels
+  # plain text, one image key per line: MLO annotations excluded from the dataset (local file, never committed)
+  mlo_exclude_list: data/label_pool/MLO_exclude.txt
+  # completed public / external images (manifest meta.csv + <bucket>/{images,labels})
+  completion_dir: data/completion
+  # external test set whose images (and patients) must never enter training
+  embed_test_csv: data/external/embed_test.csv
+  # pair-level fold assignment of the 10-fold cross-validation
+  cv10_fold_table: data/folds/fold_assignment.csv

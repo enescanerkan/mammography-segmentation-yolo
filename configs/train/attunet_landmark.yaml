@@ -1,0 +1,7 @@
+# Arm A: landmark regression only (the segmentation head receives no gradient).
+base: _attunet_base.yaml
+name: attunet_landmark
+description: AttUNet landmark-only arm (w_seg = 0)
+w_seg: 0.0
+export:
+  filename: attunet_landmark.pt

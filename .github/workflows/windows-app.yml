@@ -27,6 +27,8 @@ concurrency:
 
 env:
   ZIP: MammographyPositioning-windows-x64.zip
+  YOLO_OFFLINE: "true"        # PyInstaller imports ultralytics while analysing it: no update checks
+  YOLO_AUTOINSTALL: "false"   # ... and no pip installs of optional tracker packages into the build
 
 jobs:
   build:

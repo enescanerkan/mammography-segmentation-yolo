@@ -294,6 +294,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     home = user_dir()
     log_path = setup_logging(home)
     os.environ.setdefault("YOLO_OFFLINE", "true")  # no update checks or downloads from Ultralytics
+    os.environ.setdefault("YOLO_AUTOINSTALL", "false")  # a frozen app cannot pip-install (it would start itself)
     (home / "ultralytics").mkdir(exist_ok=True)
     os.environ.setdefault("YOLO_CONFIG_DIR", str(home / "ultralytics"))
     try:

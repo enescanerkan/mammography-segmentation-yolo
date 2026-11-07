@@ -6,8 +6,9 @@ Convert PNG mammography images + multi-class PNG masks to MedSAM2 `finetune_sam2
 
 One training line per (case, class) where the class region is large enough.
 
-If `--use-project-splits` is set, case stems are taken from `../seg-dataset/images/{train,val,test}/`
-(relative to project root). Otherwise every case under `--data-root` goes to `--default-split`.
+If `--use-project-splits` is set, case stems are taken from `<seg-dataset>/images/{train,val,test}/`
+(`$SEG_DATASET_ROOT`, default `<repo>/seg-dataset`). Otherwise every case under `--data-root` goes
+to `--default-split`.
 """
 
 from __future__ import annotations
@@ -22,8 +23,8 @@ IMG_SIZE = 1024
 GT_SIZE = 256
 
 
-def load_split_stems(project_root: Path) -> dict[str, set[str]] | None:
-    seg = project_root / "seg-dataset" / "images"
+def load_split_stems(seg_root: Path) -> dict[str, set[str]] | None:
+    seg = seg_root / "images"
     if not seg.is_dir():
         return None
     out: dict[str, set[str]] = {"train": set(), "val": set(), "test": set()}
@@ -55,7 +56,7 @@ def main() -> None:
     parser.add_argument("--default-split", type=str, default="train", choices=("train", "val", "test"))
     args = parser.parse_args()
 
-    from config import MASK_CLASS_LABELS, MIN_FG_PIXELS, NPY_OUT_ROOT, PROJECT_ROOT, RAW_MAMMO_ROOT
+    from config import MASK_CLASS_LABELS, MIN_FG_PIXELS, NPY_OUT_ROOT, RAW_MAMMO_ROOT, SEG_DATASET_ROOT
 
     raw = args.data_root or RAW_MAMMO_ROOT
     out_root = args.out or NPY_OUT_ROOT
@@ -67,7 +68,7 @@ def main() -> None:
 
     splits = None
     if args.use_project_splits:
-        splits = load_split_stems(PROJECT_ROOT)
+        splits = load_split_stems(SEG_DATASET_ROOT)
         if splits is None:
             print("[WARN] seg-dataset/images not found; falling back to --default-split for all cases.")
 

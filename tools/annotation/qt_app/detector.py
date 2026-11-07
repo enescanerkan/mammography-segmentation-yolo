@@ -20,9 +20,12 @@ from PyQt5.QtCore import QObject, QThread, pyqtSignal
 log = logging.getLogger(__name__)
 
 
-# Default location next to this file. Falls back to env override.
-_HERE = Path(__file__).resolve().parent
-DEFAULT_WEIGHTS = _HERE / "weights" / "manual_detector.pt"
+
+def default_weights_path() -> Path:
+    """``detector.weights`` from the toolkit config (``$ANNOTATION_DETECTOR_WEIGHTS``)."""
+    from toolkit_config import get_config
+
+    return get_config().detector_weights
 
 
 @dataclass
@@ -49,7 +52,7 @@ class BoxDetector:
     actually uses the detector."""
 
     def __init__(self, weights_path: Optional[Path] = None) -> None:
-        self.weights_path = Path(weights_path) if weights_path else DEFAULT_WEIGHTS
+        self.weights_path = Path(weights_path) if weights_path else default_weights_path()
         self._model = None  # populated on first predict
 
     @property

@@ -1,26 +1,29 @@
-"""Model loading + thin predict surface for the interactive demo.
+"""Model loading + thin predict surface for SAM mode.
 
-Single Responsibility:
-    Hold the SAM2 backbone + fine-tuned MedSAM2 weights, expose a clean
-    ``predict(image, box=None, points=None, neg_points=None)`` API. Nothing
-    here knows about Gradio, ignore-disk post-processing, or class
-    competition; those concerns live in :mod:`postprocess` and
-    :mod:`inference`.
+Single responsibility:
+    Hold the SAM2 backbone + fine-tuned MedSAM2 weights and expose a clean
+    ``predict(box=None, positive_points=None, negative_points=None)`` API. Nothing
+    here knows about the GUI, ignore-disk post-processing or class competition;
+    those concerns live in :mod:`postprocess` and :mod:`inference`.
 
-Important note about the fine-tuned checkpoint
-----------------------------------------------
-``wrapped_model.MedSAM2.forward`` was trained with **box prompts only**
-(``box_labels = [2, 3]`` SAM corner-token semantics, see
-``wrapped_model.py``). The mask decoder therefore performs best when the
-prompt graph it receives at inference time *contains a box*. Pure-point
-inference still runs (the underlying ``SAM2ImagePredictor`` accepts it)
-but is out-of-distribution for the fine-tune; :class:`MedSAM2Service`
-exposes both paths and lets the caller decide.
+Checkpoint selection
+--------------------
+The fine-tuned checkpoint is always the explicit file given in
+:class:`ModelConfig` (``medsam2.checkpoint`` in the toolkit config). There is no
+directory scanning / "newest run" heuristic.
+
+Note about the fine-tuned checkpoint
+------------------------------------
+:class:`~interactive.wrapped_model.MedSAM2` was trained with **box prompts only**
+(``box_labels = [2, 3]`` SAM corner-token semantics). The mask decoder therefore
+performs best when the prompt it receives at inference time *contains a box*.
+Pure-point inference still runs (``SAM2ImagePredictor`` accepts it) but is
+out-of-distribution for the fine-tune; :class:`~interactive.inference.InferencePipeline`
+synthesizes an implicit box from positive points to compensate.
 """
 
 from __future__ import annotations
 
-import glob
 import os
 import sys
 from dataclasses import dataclass
@@ -29,52 +32,40 @@ from typing import Iterable
 
 import cv2
 import numpy as np
-import torch
 
 
 @dataclass(frozen=True)
 class ModelConfig:
-    """Locations + device for model build. Immutable on purpose."""
+    """Locations + device for the model build. Immutable on purpose."""
 
     medsam2_repo: Path
     sam2_model_cfg: str
     sam2_base_weights: Path
     finetune_ckpt: Path
-    device: torch.device
+    device: str = "cpu"
 
+    @classmethod
+    def from_toolkit(cls, cfg) -> ModelConfig:
+        """Build from a :class:`toolkit_config.ToolkitConfig` (``device: auto`` resolved here)."""
+        from toolkit_config import resolve_device
 
-def resolve_finetuned_ckpt(
-    project_dir: Path,
-    env_var: str = "MEDSAM2_INTERACTIVE_CKPT",
-) -> Path:
-    """Pick the newest run dir that actually contains a weight file.
-
-    Order:
-      1. Explicit env override (if file exists).
-      2. Newest ``work_dir/MammoBNP_v1-*/medsam_model_best.pth``.
-      3. Newest ``...-latest.pth`` if no ``best``.
-    """
-    explicit = os.environ.get(env_var, "").strip()
-    if explicit and os.path.isfile(explicit):
-        return Path(explicit)
-
-    work_dirs = sorted(glob.glob(str(project_dir / "work_dir" / "MammoBNP_v1-*")))
-    if not work_dirs:
-        raise SystemExit(
-            f"No fine-tune output: {project_dir / 'work_dir'}/MammoBNP_v1-*\n"
-            f"Run finetune_sam2_img.py or set {env_var}=...\\medsam_model_best.pth"
+        return cls(
+            medsam2_repo=Path(cfg.medsam2_repo),
+            sam2_model_cfg=cfg.sam2_model_cfg,
+            sam2_base_weights=Path(cfg.sam2_base_weights),
+            finetune_ckpt=Path(cfg.medsam2_checkpoint),
+            device=resolve_device(cfg.device),
         )
 
-    for d in reversed(work_dirs):
-        for name in ("medsam_model_best.pth", "medsam_model_latest.pth"):
-            cand = Path(d) / name
-            if cand.is_file():
-                return cand
-
-    raise SystemExit(
-        f"work_dir/MammoBNP_v1-* exists but no medsam_model_best.pth/latest.pth.\n"
-        f"Use {env_var} to point at a finished checkpoint."
-    )
+    def missing_files(self) -> list[str]:
+        problems = []
+        if not (self.medsam2_repo / "sam2").is_dir():
+            problems.append(f"MedSAM2 code not found at {self.medsam2_repo}")
+        if not self.sam2_base_weights.is_file():
+            problems.append(f"SAM2 base weights not found: {self.sam2_base_weights}")
+        if not self.finetune_ckpt.is_file():
+            problems.append(f"Fine-tuned MedSAM2 checkpoint not found: {self.finetune_ckpt}")
+        return problems
 
 
 class MedSAM2Service:
@@ -82,32 +73,36 @@ class MedSAM2Service:
 
     Lifecycle
     ---------
-    Build once at app startup. Calling :meth:`set_image` caches image
-    embeddings in the underlying ``SAM2ImagePredictor`` so subsequent
-    predicts (point or box) on the same image are cheap (~ms).
+    Build once. :meth:`set_image` caches the image embeddings inside the
+    underlying ``SAM2ImagePredictor`` so subsequent predicts (point or box) on
+    the same image are cheap.
 
     Threading
     ---------
-    Not thread-safe (predictor holds image-embedding state). Gradio's
-    default queue is single-worker; if you bump workers, wrap calls in a
-    lock.
+    Not thread-safe (the predictor holds image-embedding state). The Qt app runs
+    all predictions on one worker thread.
     """
 
     def __init__(self, config: ModelConfig) -> None:
+        problems = config.missing_files()
+        if problems:
+            raise FileNotFoundError("Cannot build MedSAM2:\n  " + "\n  ".join(problems))
         self.config = config
         self._predictor = self._build_predictor(config)
-        self._image_cached_id: int | None = None
+        # Keep a reference to the cached image (not just its id()): an id can be reused
+        # by a new array after the old one is garbage-collected, which would silently
+        # reuse stale embeddings.
+        self._cached_image: np.ndarray | None = None
 
     @staticmethod
     def _build_predictor(config: ModelConfig):
-        repo = str(config.medsam2_repo)
-        if not (Path(repo) / "sam2").is_dir():
-            raise SystemExit(
-                f"MedSAM2 repo not found at {repo}. "
-                "git clone -b MedSAM2 https://github.com/bowang-lab/MedSAM.git"
-            )
-        sys.path.insert(0, repo)
+        import torch
 
+        repo = str(config.medsam2_repo)
+        if repo not in sys.path:
+            sys.path.insert(0, repo)
+
+        # build_sam2 resolves its Hydra config relative to the MedSAM2 checkout.
         prev_cwd = os.getcwd()
         os.chdir(repo)
         try:
@@ -124,29 +119,23 @@ class MedSAM2Service:
         finally:
             os.chdir(prev_cwd)
 
-        from wrapped_model import MedSAM2  # local import: avoids hard dep at import time
+        from .wrapped_model import MedSAM2
 
         medsam = MedSAM2(model=sam2_model)
         try:
-            ckpt = torch.load(
-                str(config.finetune_ckpt),
-                map_location=str(config.device),
-                weights_only=False,
-            )
-        except TypeError:
+            ckpt = torch.load(str(config.finetune_ckpt), map_location=str(config.device), weights_only=False)
+        except TypeError:  # torch < 1.13 has no weights_only
             ckpt = torch.load(str(config.finetune_ckpt), map_location=str(config.device))
         medsam.load_state_dict(ckpt["model"], strict=True)
         medsam.eval()
         return SAM2ImagePredictor(medsam.sam2_model)
 
     def set_image(self, rgb: np.ndarray) -> None:
-        """Cache image embeddings. Calling with the *same* numpy array (by id)
-        is a no-op so consecutive predicts on the same image stay fast."""
-        ident = id(rgb)
-        if ident == self._image_cached_id:
+        """Cache image embeddings. Calling again with the *same* array object is a no-op."""
+        if rgb is self._cached_image:
             return
         self._predictor.set_image(rgb)
-        self._image_cached_id = ident
+        self._cached_image = rgb
 
     def predict(
         self,
@@ -166,9 +155,9 @@ class MedSAM2Service:
         Notes
         -----
         - When both box and points are given, the box drives the geometry
-          (matches fine-tune distribution) and points are refinement.
-        - ``multimask_output``: if not specified, uses ``True`` only when
-          there's exactly one positive point and no box (genuine ambiguity).
+          (matches the fine-tune distribution) and points refine it.
+        - ``multimask_output``: if not specified, ``True`` only when there is
+          exactly one positive point and no box (genuine ambiguity).
         """
         pos = list(positive_points or [])
         neg = list(negative_points or [])
@@ -184,9 +173,7 @@ class MedSAM2Service:
             box_arr = np.asarray(box_xyxy, dtype=np.float32).reshape(4)
 
         if multimask_output is None:
-            multimask_output = (
-                box_arr is None and len(pos) == 1 and len(neg) == 0
-            )
+            multimask_output = box_arr is None and len(pos) == 1 and len(neg) == 0
 
         masks, scores, _ = self._predictor.predict(
             point_coords=point_coords,
@@ -220,3 +207,16 @@ class MedSAM2Service:
         if mask.shape == (height, width):
             return mask
         return cv2.resize(mask, (width, height), interpolation=cv2.INTER_NEAREST)
+
+
+def build_pipeline(cfg):
+    """Build an :class:`~interactive.inference.InferencePipeline` from the toolkit config.
+
+    Raises ``FileNotFoundError`` listing every missing file before importing torch / sam2.
+    """
+    from .inference import InferencePipeline
+
+    problems = cfg.missing_medsam2_files()
+    if problems:
+        raise FileNotFoundError("Cannot start SAM mode:\n  " + "\n  ".join(problems))
+    return InferencePipeline(MedSAM2Service(ModelConfig.from_toolkit(cfg)))

@@ -1,4 +1,4 @@
-"""Main application window for the PyQt5 MedSAM2 annotation tool."""
+"""Startup launcher + annotation main window (SAM and Manual modes) for the toolkit."""
 
 from __future__ import annotations
 
@@ -6,9 +6,63 @@ import logging
 from pathlib import Path
 from typing import Optional
 
-import cv2
 import numpy as np
-import torch
+from PyQt5.QtCore import QEvent, QSize, Qt, QTimer, pyqtSignal
+from PyQt5.QtGui import QKeySequence
+from PyQt5.QtWidgets import (
+    QAbstractSpinBox,
+    QAction,
+    QApplication,
+    QButtonGroup,
+    QCheckBox,
+    QColorDialog,
+    QComboBox,
+    QDialog,
+    QFileDialog,
+    QFrame,
+    QHBoxLayout,
+    QInputDialog,
+    QLabel,
+    QLineEdit,
+    QListWidget,
+    QListWidgetItem,
+    QMainWindow,
+    QMessageBox,
+    QPushButton,
+    QRadioButton,
+    QScrollArea,
+    QShortcut,
+    QSizePolicy,
+    QSlider,
+    QStatusBar,
+    QToolBar,
+    QVBoxLayout,
+    QWidget,
+)
+
+from interactive.inference import InferencePipeline, InferenceSettings
+from interactive.prompts import TISSUE_PRESETS, TissuePreset
+
+from .canvas import (
+    MODE_BOX,
+    MODE_EDIT_POLYGON,
+    MODE_IDLE,
+    MODE_POINT,
+    MammoCanvas,
+    mask_to_polygon,
+    polygon_to_mask,
+)
+from .detector import BoxDetector, run_detector_async
+from .image_io import load_image_rgb
+from .pnl_analysis import analyze_annotation
+from .session import AnnotationSession, list_images
+from .theme import (
+    QSS,
+    TEXT_PRIMARY,
+    TEXT_SECONDARY,
+    TISSUE_RGB,
+)
+from .worker import InferenceRequest, InferenceWorker
 
 log = logging.getLogger(__name__)
 
@@ -83,8 +137,6 @@ def register_custom_tissue(
     Raises ``_CustomClassError`` if the supplied color is already used by
     another class (preventing visual ambiguity).
     """
-    from interactive.prompts import TISSUE_PRESETS, TissuePreset  # local: avoid cycles
-
     base_key = _slugify_class_key(label)
     key = base_key
     i = 1
@@ -118,67 +170,15 @@ def unregister_custom_tissue(key: str) -> None:
     custom class or when the window closes (back-to-menu cleanup)."""
     TISSUE_PRESETS.pop(key, None)
     TISSUE_RGB.pop(key, None)
-from PyQt5.QtCore import QEvent, QSize, Qt, QTimer, pyqtSignal
-from PyQt5.QtGui import QKeySequence
-from PyQt5.QtWidgets import (
-    QAbstractSpinBox,
-    QAction,
-    QApplication,
-    QButtonGroup,
-    QCheckBox,
-    QColorDialog,
-    QComboBox,
-    QDialog,
-    QFileDialog,
-    QFrame,
-    QHBoxLayout,
-    QInputDialog,
-    QLabel,
-    QLineEdit,
-    QListWidget,
-    QListWidgetItem,
-    QMainWindow,
-    QMessageBox,
-    QPushButton,
-    QRadioButton,
-    QScrollArea,
-    QShortcut,
-    QSizePolicy,
-    QSlider,
-    QStatusBar,
-    QToolBar,
-    QVBoxLayout,
-    QWidget,
-)
 
-from interactive.inference import InferencePipeline, InferenceSettings
-from interactive.prompts import TISSUE_PRESETS, PromptState, TissuePreset
 
-from .canvas import (
-    MODE_BOX,
-    MODE_EDIT_POLYGON,
-    MODE_IDLE,
-    MODE_POINT,
-    MammoCanvas,
-    mask_to_polygon,
-    polygon_to_mask,
-)
-from .detector import BoxDetector, Detection, run_detector_async
-from .image_io import load_image_rgb
-from .pnl_analysis import analyze_annotation
-from .session import AnnotationSession, list_images, tissue_to_yolo_id
-from .theme import (
-    ACCENT,
-    ALERT,
-    APP_BG,
-    QSS,
-    SUCCESS,
-    SURFACE,
-    TEXT_PRIMARY,
-    TEXT_SECONDARY,
-    TISSUE_RGB,
-)
-from .worker import InferenceRequest, InferenceWorker
+def _device_label() -> str:
+    """Status-bar device label ("CUDA" or "CPU"); torch is imported lazily."""
+    try:
+        import torch
+    except ImportError:
+        return "CPU"
+    return "CUDA" if torch.cuda.is_available() else "CPU"
 
 
 # ─── Startup dialog ──────────────────────────────────────────────────────
@@ -414,8 +414,10 @@ class StartupDialog(QDialog):
             "<tr><td><b>Middle-drag</b></td><td>Pan</td></tr>"
             "<tr><td><b>Double-click background</b></td><td>Fit view + reset W/L</td></tr>"
             "<tr><td><b>Alt + click vertex</b></td><td>Delete a polygon vertex</td></tr>"
+            "<tr><td><b>C</b></td><td>Measure PNL (MLO) / CC depth</td></tr>"
             "</table>"
-            "<p style='color:#A0AEC0'>For full documentation, see the README files under <code>medsam2_experiments/docs/</code>.</p>"
+            "<p style='color:#A0AEC0'>Full documentation: <code>tools/annotation/README.md</code> and "
+            "<code>tools/annotation/docs/</code>.</p>"
         )
         box = _MB(self)
         box.setIcon(_MB.NoIcon)
@@ -515,12 +517,8 @@ class MainWindow(QMainWindow):
         self._build_menu_and_toolbar()
         self._build_shortcuts()
 
-        if self._manual_mode:
-            device_label = "CUDA" if torch.cuda.is_available() else "CPU"
-            self._lbl_device.setText(f"Annotation Studio • {device_label}")
-        else:
-            device_label = "CUDA" if torch.cuda.is_available() else "CPU"
-            self._lbl_device.setText(f"SAM Workspace • {device_label}")
+        mode_label = "Annotation Studio" if self._manual_mode else "SAM Workspace"
+        self._lbl_device.setText(f"{mode_label} • {_device_label()}")
 
     # ─── UI construction ───────────────────────────────────────────────
 
@@ -663,7 +661,8 @@ class MainWindow(QMainWindow):
 
         # ── Card: Actions ────────────────────────────────────────────
         c_act, l_act = self._card("ACTIONS")
-        row1 = QHBoxLayout(); row1.setSpacing(6)
+        row1 = QHBoxLayout()
+        row1.setSpacing(6)
         self._b_undo_pos = QPushButton("↶ Pos")
         self._b_undo_pos.setToolTip("Undo last positive point (SAM)")
         self._b_undo_pos.clicked.connect(lambda: self._undo("positive"))
@@ -679,18 +678,22 @@ class MainWindow(QMainWindow):
         self._b_undo_vertex.clicked.connect(lambda: self._canvas.undo_last_draw_vertex())
         for b in (self._b_undo_pos, self._b_undo_ign, self._b_reset_box, self._b_undo_vertex):
             row1.addWidget(b)
-        row1_w = QWidget(); row1_w.setLayout(row1)
+        row1_w = QWidget()
+        row1_w.setLayout(row1)
         l_act.addWidget(row1_w)
 
-        row2 = QHBoxLayout(); row2.setSpacing(6)
+        row2 = QHBoxLayout()
+        row2.setSpacing(6)
         b_clear_tissue = QPushButton("Clear Tissue")
         b_clear_tissue.setObjectName("danger")
         b_clear_tissue.clicked.connect(self._clear_active_tissue)
         b_clear_all = QPushButton("Clear All")
         b_clear_all.setObjectName("danger")
         b_clear_all.clicked.connect(self._clear_image)
-        row2.addWidget(b_clear_tissue); row2.addWidget(b_clear_all)
-        row2_w = QWidget(); row2_w.setLayout(row2)
+        row2.addWidget(b_clear_tissue)
+        row2.addWidget(b_clear_all)
+        row2_w = QWidget()
+        row2_w.setLayout(row2)
         l_act.addWidget(row2_w)
 
         self._btn_rerun = QPushButton("▶  Re-run Prediction")
@@ -749,7 +752,8 @@ class MainWindow(QMainWindow):
         inst_row.addWidget(self._btn_prev_instance)
         inst_row.addWidget(self._lbl_instance_pos, 1, Qt.AlignCenter)
         inst_row.addWidget(self._btn_next_instance)
-        inst_w = QWidget(); inst_w.setLayout(inst_row)
+        inst_w = QWidget()
+        inst_w.setLayout(inst_row)
         l_poly.addWidget(inst_w)
         # We currently edit the LAST instance; this index counts from the
         # end (0 = last, 1 = second to last, ...).
@@ -798,13 +802,16 @@ class MainWindow(QMainWindow):
 
         # ── Card: Files ──────────────────────────────────────────────
         c_files, l_files = self._card("FILES")
-        nav_row = QHBoxLayout(); nav_row.setSpacing(6)
+        nav_row = QHBoxLayout()
+        nav_row.setSpacing(6)
         self._btn_prev = QPushButton("◀  Prev")
         self._btn_prev.clicked.connect(self._goto_prev)
         self._btn_next = QPushButton("Next  ▶")
         self._btn_next.clicked.connect(self._goto_next)
-        nav_row.addWidget(self._btn_prev); nav_row.addWidget(self._btn_next)
-        nav_w = QWidget(); nav_w.setLayout(nav_row)
+        nav_row.addWidget(self._btn_prev)
+        nav_row.addWidget(self._btn_next)
+        nav_w = QWidget()
+        nav_w.setLayout(nav_row)
         l_files.addWidget(nav_w)
 
         self._image_list = QListWidget()
@@ -824,11 +831,11 @@ class MainWindow(QMainWindow):
         footer.setObjectName("sideFooter")
         fl = QVBoxLayout(footer)
         fl.setContentsMargins(14, 12, 14, 14)
-        self._btn_calc = QPushButton("📐  Hesapla (PNL / CC)")
+        self._btn_calc = QPushButton("📐  Measure (PNL / CC)")
         self._btn_calc.setMinimumHeight(40)
         self._btn_calc.setToolTip(
-            "Nipple + Pectoral (MLO) etiketliyse PNL'i, sadece Nipple + Breast "
-            "(CC) ise meme derinliğini çizer (C)"
+            "Draws the PNL when Nipple + Pectoral are labelled (MLO), or the breast depth "
+            "when only Nipple + Breast are labelled (CC). Shortcut: C"
         )
         self._btn_calc.clicked.connect(self._calculate_geometry)
         fl.addWidget(self._btn_calc)
@@ -1014,7 +1021,7 @@ class MainWindow(QMainWindow):
         # exist — so we pick the first remaining radio, or None if the
         # user just removed the last class.
         if self._current_tissue_key == key:
-            remaining_keys = [k for k in self._tissue_radios.keys() if k != key]
+            remaining_keys = [k for k in self._tissue_radios if k != key]
             if remaining_keys:
                 fallback = remaining_keys[0]
                 self._tissue_radios[fallback].setChecked(True)
@@ -1074,13 +1081,16 @@ class MainWindow(QMainWindow):
         m_file.addAction(a_exit)
 
         m_view = menu.addMenu("&View")
-        a_zoom_in = QAction("Zoom &In", self); a_zoom_in.setShortcut("Ctrl++")
+        a_zoom_in = QAction("Zoom &In", self)
+        a_zoom_in.setShortcut("Ctrl++")
         a_zoom_in.triggered.connect(lambda: self._canvas.zoom_in())
         m_view.addAction(a_zoom_in)
-        a_zoom_out = QAction("Zoom &Out", self); a_zoom_out.setShortcut("Ctrl+-")
+        a_zoom_out = QAction("Zoom &Out", self)
+        a_zoom_out.setShortcut("Ctrl+-")
         a_zoom_out.triggered.connect(lambda: self._canvas.zoom_out())
         m_view.addAction(a_zoom_out)
-        a_fit = QAction("&Fit to View", self); a_fit.setShortcut("Ctrl+0")
+        a_fit = QAction("&Fit to View", self)
+        a_fit.setShortcut("Ctrl+0")
         a_fit.triggered.connect(lambda: self._canvas.fit_to_view())
         m_view.addAction(a_fit)
 
@@ -1094,9 +1104,9 @@ class MainWindow(QMainWindow):
         a_reset_wl.setToolTip("Reset brightness/contrast (right-drag = window/level)")
         a_reset_wl.triggered.connect(lambda: self._canvas.reset_window_level())
 
-        a_calc = QAction("📐 Hesapla (PNL/CC)", self)
+        a_calc = QAction("📐 Measure (PNL/CC)", self)
         a_calc.setShortcut("C")
-        a_calc.setToolTip("Etiketlenen dokulardan PNL / CC derinliğini hesapla ve çiz (C)")
+        a_calc.setToolTip("Compute and draw the PNL / CC depth from the labelled tissues (C)")
         a_calc.triggered.connect(self._calculate_geometry)
 
         tb = QToolBar("Main")
@@ -1112,7 +1122,7 @@ class MainWindow(QMainWindow):
         a_zoom_out.setIconText("Zoom −")
         a_fit.setIconText("Fit View")
         a_reset_wl.setIconText("Reset W/L")
-        a_calc.setIconText("📐 Hesapla")
+        a_calc.setIconText("📐 Measure")
         a_commit.setIconText("✓ Commit")
         a_back.setIconText("← Menu")
 
@@ -1545,7 +1555,7 @@ class MainWindow(QMainWindow):
         if self._current_image_path is None or not self._current_tissue_key:
             return
         from_tissue = self._current_tissue_key
-        candidates = [k for k in TISSUE_PRESETS.keys() if k != from_tissue]
+        candidates = [k for k in TISSUE_PRESETS if k != from_tissue]
         if not candidates:
             QMessageBox.information(
                 self, "No other classes",
@@ -1790,8 +1800,10 @@ class MainWindow(QMainWindow):
                 QMessageBox.critical(
                     self, "Detector weights missing",
                     f"Expected weights file not found:\n{self._detector.weights_path}\n\n"
-                    "Place the YOLO model there and try again.",
+                    "Place a YOLO detection model there, or point detector.weights in "
+                    "annotation.yaml (or $ANNOTATION_DETECTOR_WEIGHTS) at it, then try again.",
                 )
+                self._detector = None
                 return
         # Prevent re-entrant runs. The thread may already have been
         # scheduled for deletion (Qt's deleteLater) after a previous run —
@@ -2108,7 +2120,7 @@ class MainWindow(QMainWindow):
         currently-labelled tissues on this image."""
         path = self._current_image_path
         if path is None:
-            self._status.showMessage("Önce bir görüntü açın.", 4000)
+            self._status.showMessage("Open an image first.", 4000)
             return
         # Flush the in-flight canvas edit so the freshest masks are analysed.
         self._persist_current_prompts()
@@ -2116,7 +2128,7 @@ class MainWindow(QMainWindow):
         if ann is None or not ann.has_any_mask():
             self._canvas.clear_analysis_overlay()
             self._status.showMessage(
-                "Hesaplama için en az Nipple + (Pectoral veya Breast) etiketleyin.", 6000
+                "Label at least Nipple + (Pectoral or Breast) to measure.", 6000
             )
             return
 
@@ -2129,11 +2141,11 @@ class MainWindow(QMainWindow):
                 )
             elif result.cc_depth is not None:
                 self._status.showMessage(
-                    f"CC • Derinlik = {result.cc_depth.distance_px:.1f} px", 8000
+                    f"CC • Depth = {result.cc_depth.distance_px:.1f} px", 8000
                 )
         else:
             self._canvas.clear_analysis_overlay()
-            msg = " ".join(result.messages) or "Ölçüm hesaplanamadı."
+            msg = " ".join(result.messages) or "Could not compute the measurement."
             self._status.showMessage(msg, 6000)
 
     # ─── Helpers ───────────────────────────────────────────────────────

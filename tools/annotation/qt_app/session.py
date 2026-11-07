@@ -7,15 +7,14 @@ every dirty image to ``<images_dir>/labels/<stem>.txt`` (YOLO seg format).
 YOLO class id derivation
 ------------------------
 ``TissuePreset.class_id`` from :mod:`interactive.prompts` is the *raster
-mask pixel* id (1=pectoral, 2=breast, 3=nipple, matching
-``config.MASK_CLASS_LABELS``). The corresponding YOLO class id is
-``class_id - 1`` (0=pectoral, 1=breast, 2=nipple) which matches
-``seg-dataset/data.yaml``.
+mask pixel* id (1=pectoral, 2=breast, 3=nipple, as in
+``experiments/config.py``). The corresponding YOLO class id is
+``class_id - 1`` (0=pectoral, 1=breast, 2=nipple), the ids of the
+repository's segmentation datasets.
 """
 
 from __future__ import annotations
 
-import copy
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Iterable

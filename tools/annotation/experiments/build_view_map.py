@@ -1,17 +1,14 @@
 """
-Build data/raw_mammo/view_map.csv mapping image stem -> CC or MLO.
+Build experiments/data/raw_mammo/view_map.csv mapping image stem -> CC or MLO.
 
-Scans project compare-dataset:
+Scans a compare-dataset laid out as:
   compare-dataset/CC/images/{train,val,test}/*.png  -> CC
   compare-dataset/MLO/images/{train,val,test}/*.png -> MLO
 
-If the same stem appears in both (unusual), the last scan wins — re-run after cleaning duplicates.
+If the same stem appears in both (unusual), the last scan wins; re-run after cleaning duplicates.
 
-Run from repo root:
-  python medsam2_experiments/build_view_map.py
-
-Or:
-  python build_view_map.py   # from medsam2_experiments/
+Run:
+  python tools/annotation/experiments/build_view_map.py --compare-root /path/to/compare-dataset
 """
 
 from __future__ import annotations
@@ -27,20 +24,20 @@ def main() -> None:
         "--compare-root",
         type=Path,
         default=None,
-        help="compare-dataset root (default: ../compare-dataset from this script)",
+        help="compare-dataset root (default: <repo>/compare-dataset)",
     )
     p.add_argument(
         "--out",
         type=Path,
         default=None,
-        help="Output CSV (default: medsam2_experiments/data/raw_mammo/view_map.csv)",
+        help="Output CSV (default: experiments/data/raw_mammo/view_map.csv)",
     )
     args = p.parse_args()
 
-    here = Path(__file__).resolve().parent
-    project = here.parent
-    compare = args.compare_root or (project / "compare-dataset")
-    out = args.out or (here / "data" / "raw_mammo" / "view_map.csv")
+    from config import PROJECT_ROOT, RAW_MAMMO_ROOT
+
+    compare = args.compare_root or (PROJECT_ROOT / "compare-dataset")
+    out = args.out or (RAW_MAMMO_ROOT / "view_map.csv")
 
     stem_to_view: dict[str, str] = {}
     splits = ("train", "val", "test")

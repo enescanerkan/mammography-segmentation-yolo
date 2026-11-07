@@ -8,11 +8,9 @@ formatted lines on both console and a rolling file.
 from __future__ import annotations
 
 import logging
-import os
 import sys
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
-
 
 _LOG_FORMAT = "%(asctime)s [%(levelname)-7s] %(name)s :: %(message)s"
 _DATE_FORMAT = "%H:%M:%S"
@@ -45,7 +43,9 @@ def setup_logging(
 
     # File (rolling)
     if log_dir is None:
-        log_dir = Path(__file__).resolve().parent.parent / "logs"
+        from toolkit_config import get_config
+
+        log_dir = get_config().logs_dir
     log_dir.mkdir(parents=True, exist_ok=True)
     log_path = log_dir / "qt_app.log"
     fh = RotatingFileHandler(

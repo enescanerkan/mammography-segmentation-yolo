@@ -20,7 +20,6 @@ from typing import Iterable
 import cv2
 import numpy as np
 
-
 # --- Tissue presets ----------------------------------------------------------
 
 @dataclass(frozen=True)
@@ -28,7 +27,7 @@ class TissuePreset:
     key: str
     label: str
     overlay_bgr: tuple[int, int, int]
-    class_id: int  # matches MASK_CLASS_LABELS in config.py
+    class_id: int  # raster mask id (1 pectoral, 2 breast, 3 nipple); YOLO id = class_id - 1
 
 
 TISSUE_PRESETS: dict[str, TissuePreset] = {
@@ -148,7 +147,14 @@ def _draw_marker_ignore(canvas: np.ndarray, x: int, y: int, radius: int) -> None
     cv2.circle(canvas, (x, y), 3, _bgr_to_rgb(_COLOR_IGNORE_INNER), -1, cv2.LINE_AA)
 
 
-def _dashed_rect(canvas: np.ndarray, p1: tuple[int, int], p2: tuple[int, int], color: tuple[int, int, int], thick: int = 2, dash: int = 8) -> None:
+def _dashed_rect(
+    canvas: np.ndarray,
+    p1: tuple[int, int],
+    p2: tuple[int, int],
+    color: tuple[int, int, int],
+    thick: int = 2,
+    dash: int = 8,
+) -> None:
     x0, y0 = p1
     x1, y1 = p2
     for x_start in range(x0, x1, dash * 2):
@@ -175,7 +181,7 @@ def _draw_box(canvas: np.ndarray, box: BoxPrompt) -> None:
         cv2.circle(canvas, (x, y), 18, color, 3, cv2.LINE_AA)
         cv2.circle(canvas, (x, y), 5, color, -1, cv2.LINE_AA)
         cv2.putText(
-            canvas, "1. kose - simdi karsi kosesine tikla",
+            canvas, "corner 1 - now click the opposite corner",
             (x + 22, y - 12),
             cv2.FONT_HERSHEY_SIMPLEX, 0.55, color, 2, cv2.LINE_AA,
         )

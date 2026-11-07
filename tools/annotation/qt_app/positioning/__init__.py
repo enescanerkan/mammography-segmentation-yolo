@@ -1,9 +1,7 @@
-"""
-Mammogram Positioning Analysis - Source Package
+"""Breast Positioning tool (MLO / CC landmark-based positioning assessment).
 
-A deep learning-based tool for analyzing mammogram positioning quality
-using MLO and CC view landmark detection.
+YOLO-pose models predict the nipple (both views) and two pectoral-line points (MLO);
+the tool compares the MLO nipple-to-pectoral distance with the CC nipple-to-chest-wall
+distance against a millimetre threshold. Launched in-process by
+``qt_app.positioning_launcher``.
 """
-
-__version__ = "1.0.0"
-__author__ = "Mammogram Analysis Team"

@@ -1,0 +1,29 @@
+# Annotation toolkit configuration (template).
+#
+# Copy to tools/annotation/annotation.yaml (git-ignored) or pass --config PATH.
+# Every key is optional; the values below are the built-in defaults.
+#
+# Path rules:
+#   * weights_root, medsam2.repo, positioning.results_dir, logs_dir:
+#       relative paths resolve against the folder of this file.
+#   * weight files (medsam2.sam2_base, medsam2.checkpoint, detector.weights,
+#     positioning.*_weights): relative paths resolve against weights_root.
+#   * Each key can be overridden by an environment variable (shown on the right).
+
+weights_root: weights                                   # $ANNOTATION_WEIGHTS_ROOT
+logs_dir: logs                                          # $ANNOTATION_LOGS_DIR
+
+medsam2:                                                # SAM Label mode
+  repo: vendor/MedSAM                                   # $MEDSAM2_REPO  (MedSAM2 branch of bowang-lab/MedSAM)
+  model_cfg: sam2_hiera_t.yaml                          # $SAM2_MODEL_CFG
+  sam2_base: medsam2/sam2_hiera_tiny.pt                 # $MEDSAM2_SAM2_BASE
+  checkpoint: medsam2/medsam_model_best.pth             # $MEDSAM2_CHECKPOINT  (explicit; never auto-picked)
+  device: auto                                          # $MEDSAM2_DEVICE  (auto | cpu | cuda | cuda:1 ...)
+
+detector:                                               # Manual Label mode, "Run Box Detector"
+  weights: detector/manual_detector.pt                  # $ANNOTATION_DETECTOR_WEIGHTS
+
+positioning:                                            # Breast Positioning mode
+  mlo_weights: positioning/mlo-yolo26-pose-advanced.pt  # $POSITIONING_MLO_WEIGHTS
+  cc_weights: positioning/cc-yolo26-pose-advanced.pt    # $POSITIONING_CC_WEIGHTS
+  results_dir: results/positioning                      # $POSITIONING_RESULTS_DIR

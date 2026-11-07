@@ -2,16 +2,13 @@
 Model manager for loading and managing MLO and CC YOLO pose models.
 """
 
-import os
-import numpy as np
-import cv2
-import torch
 from abc import ABC, abstractmethod
 from typing import Optional, Tuple
 
-from ultralytics import YOLO
+import cv2
+import numpy as np
 
-from utils.paths import gui_bundle_root, resolve_weight_path
+from ..utils.paths import weight_paths
 
 
 class IModelManager(ABC):
@@ -30,30 +27,19 @@ class ModelManager(IModelManager):
     """Manager for loading and using MLO and CC YOLO pose landmark detection models."""
 
     def __init__(self):
+        import torch  # lazy: keeps importing this module cheap
+
         self.device = 'cuda' if torch.cuda.is_available() else 'cpu'
         self.models = {}
 
     def load_models(self) -> None:
-        self._load_mlo_model()
-        self._load_cc_model()
+        """Load both pose models from ``positioning.mlo_weights`` / ``positioning.cc_weights``."""
+        from ultralytics import YOLO
 
-    def _load_mlo_model(self) -> None:
-        model_path = self._get_model_path("mlo-yolo26-pose-advanced.pt")
-        if not os.path.exists(model_path):
-            raise FileNotFoundError(f"MLO model not found: {model_path}")
-        self.models['mlo'] = YOLO(model_path)
-
-    def _load_cc_model(self) -> None:
-        model_path = self._get_model_path("cc-yolo26-pose-advanced.pt")
-        if not os.path.exists(model_path):
-            raise FileNotFoundError(f"CC model not found: {model_path}")
-        self.models['cc'] = YOLO(model_path)
-
-    def _get_model_path(self, model_filename: str) -> str:
-        resolved = resolve_weight_path(model_filename)
-        if resolved is not None:
-            return str(resolved)
-        return str(gui_bundle_root() / "weights" / model_filename)
+        for view, path in weight_paths().items():
+            if not path.is_file():
+                raise FileNotFoundError(f"{view.upper()} pose model not found: {path}")
+            self.models[view] = YOLO(str(path))
 
     def predict_landmarks(self, image: np.ndarray, model_type: str,
                          original_shape: Optional[Tuple[int, int]] = None) -> Optional[np.ndarray]:

@@ -1,13 +1,17 @@
-"""Entry point for the PyQt5 Mammography Toolkit.
+"""Entry point for the PyQt5 Mammography Annotation Toolkit.
 
-Run:
-    python medsam2_qt_demo.py
-Optional:
-    set MEDSAM2_INTERACTIVE_CKPT=C:\\path\\to\\medsam_model_best.pth
+Run (from anywhere):
+    python tools/annotation/app.py                     # uses annotation.yaml if present
+    python tools/annotation/app.py --config my.yaml
+    python tools/annotation/app.py --print-config      # show resolved paths and exit
+
+Model files are configured in ``annotation.yaml`` / environment variables, see
+``toolkit_config.py`` and ``tools/annotation/README.md``.
 """
 
 from __future__ import annotations
 
+import argparse
 import logging
 import os
 import sys
@@ -18,38 +22,24 @@ _HERE = Path(__file__).resolve().parent
 if str(_HERE) not in sys.path:
     sys.path.insert(0, str(_HERE))
 
-from PyQt5.QtCore import QTimer
-from PyQt5.QtWidgets import QApplication, QDialog, QMessageBox
+from PyQt5.QtWidgets import QApplication, QMessageBox  # noqa: E402
 
-from qt_app.logging_setup import setup_logging
-from qt_app.main_window import MainWindow, StartupDialog
-from qt_app.theme import QSS as THEME_QSS
+import toolkit_config  # noqa: E402  (the imports below need the sys.path entry above)
+from qt_app.logging_setup import setup_logging  # noqa: E402
+from qt_app.main_window import MainWindow, StartupDialog  # noqa: E402
+from qt_app.theme import QSS as THEME_QSS  # noqa: E402
 
 log = logging.getLogger(__name__)
 
 
 def _build_pipeline():
-    """Lazy-build the SAM pipeline. Imports torch inside so manual mode
-    doesn't pay the torch import cost."""
-    import torch
+    """Build the MedSAM2 pipeline (imports torch lazily, so Manual mode does not pay for it)."""
+    from interactive.model import build_pipeline
 
-    from config import MEDSAM2_REPO, SAM2_BASE_WEIGHTS, SAM2_MODEL_CFG
-    from interactive import InferencePipeline, MedSAM2Service
-    from interactive.model import ModelConfig, resolve_finetuned_ckpt
-
-    finetune_ckpt = resolve_finetuned_ckpt(_HERE)
-    log.info("SAM2 fine-tune checkpoint: %s", finetune_ckpt)
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-    log.info("SAM2 device=%s repo=%s", device, MEDSAM2_REPO)
-    config = ModelConfig(
-        medsam2_repo=Path(MEDSAM2_REPO),
-        sam2_model_cfg=SAM2_MODEL_CFG,
-        sam2_base_weights=Path(SAM2_BASE_WEIGHTS),
-        finetune_ckpt=Path(finetune_ckpt),
-        device=__import__("torch").device(device),
-    )
-    service = MedSAM2Service(config)
-    return InferencePipeline(service)
+    cfg = toolkit_config.get_config()
+    log.info("MedSAM2 checkpoint: %s", cfg.medsam2_checkpoint)
+    log.info("SAM2 base: %s  repo: %s  device: %s", cfg.sam2_base_weights, cfg.medsam2_repo, cfg.device)
+    return build_pipeline(cfg)
 
 
 class _ToolkitController:
@@ -99,11 +89,20 @@ class _ToolkitController:
             self.app.processEvents()
             try:
                 pipeline = _build_pipeline()
-            except Exception:  # noqa: BLE001
+            except FileNotFoundError as exc:
+                log.error("SAM mode unavailable: %s", exc)
+                QMessageBox.critical(
+                    self.dlg, "MedSAM2 files missing",
+                    f"{exc}\n\nConfigure the medsam2.* keys in annotation.yaml (or the matching "
+                    "environment variables). See tools/annotation/README.md.",
+                )
+                self.dlg.show_cards()
+                return
+            except Exception as exc:  # noqa: BLE001 - surface any build error to the user
                 log.exception("Failed to build SAM pipeline")
                 QMessageBox.critical(
                     self.dlg, "SAM load failed",
-                    "Could not load MedSAM2 weights. See logs/qt_app.log.",
+                    f"Could not load MedSAM2:\n{exc}\n\nDetails are in the toolkit log (logs_dir).",
                 )
                 self.dlg.show_cards()
                 return
@@ -148,7 +147,7 @@ class _ToolkitController:
             log.exception("Positioning launch raised")
             QMessageBox.critical(
                 self.dlg, "Positioning failed",
-                "Breast Positioning failed to load. See logs/qt_app.log.",
+                "Breast Positioning failed to load. Details are in the toolkit log (logs_dir).",
             )
             if self.dlg is not None:
                 self.dlg.show_cards()
@@ -171,11 +170,29 @@ class _ToolkitController:
             self.dlg.finish_with(StartupDialog.CHOICE_POSITIONING, None)
 
 
-def main() -> int:
-    setup_logging()
+def _parse_args(argv: Optional[list] = None) -> tuple[argparse.Namespace, list]:
+    """Toolkit options; anything unrecognised is passed through to Qt (e.g. ``-platform``)."""
+    p = argparse.ArgumentParser(description="Mammography annotation toolkit (SAM / Manual / Positioning).")
+    p.add_argument("--config", type=Path, default=None,
+                   help="YAML config (default: $ANNOTATION_CONFIG, else tools/annotation/annotation.yaml if present)")
+    p.add_argument("--print-config", action="store_true", help="Print the resolved configuration and exit.")
+    return p.parse_known_args(argv)
+
+
+def main(argv: Optional[list] = None) -> int:
+    args, qt_args = _parse_args(argv)
+    toolkit_config.set_config_path(args.config)
+    cfg = toolkit_config.get_config()
+    if args.print_config:
+        print(cfg.describe())
+        return 0
+
+    setup_logging(cfg.logs_dir)
     log.info("─── Mammography Toolkit starting ───")
+    for line in cfg.describe().splitlines():
+        log.info("config: %s", line)
     os.environ.setdefault("QT_AUTO_SCREEN_SCALE_FACTOR", "1")
-    app = QApplication(sys.argv)
+    app = QApplication(sys.argv[:1] + qt_args)
     app.setApplicationName("Mammography Toolkit")
     # Apply the toolkit theme at the application level so EVERY widget —
     # including stand-alone QInputDialog / QColorDialog / QMessageBox

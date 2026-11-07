@@ -1,22 +1,20 @@
-"""Interactive MedSAM2 demo package.
+"""MedSAM2 inference stack used by the toolkit's SAM mode (no Qt imports).
 
 Modules
 -------
-- ``model``        : Model loading + low-level predict surface (SRP).
-- ``prompts``      : PromptState dataclass + drawing helpers.
-- ``postprocess``  : Strategies that transform raw masks (hard ignore disks,
-                     class competition).
-- ``inference``    : Composition pipeline: prompt + image -> final mask.
-- ``ui``           : Gradio UI builder.
+- ``model``         : model loading + low-level predict surface.
+- ``wrapped_model`` : MedSAM2 wrapper matching the upstream fine-tune forward pass.
+- ``prompts``       : prompt state (box / positive / ignore points), tissue presets, drawing helpers.
+- ``postprocess``   : hard ignore disks and class competition.
+- ``inference``     : composition pipeline: prompts + image -> final mask.
 
-The split follows SRP: each module owns ONE concern. The Gradio UI module
-imports from the others; nothing imports from ``ui``.
+Each module owns one concern; ``torch`` is imported lazily, only when a model is built.
 """
 
-from .model import MedSAM2Service
-from .prompts import BoxPrompt, PromptState, render_overlay
-from .postprocess import ClassCompetition, HardIgnoreMask
 from .inference import InferencePipeline, InferenceSettings, PredictionResult
+from .model import MedSAM2Service, ModelConfig
+from .postprocess import ClassCompetition, HardIgnoreMask
+from .prompts import BoxPrompt, PromptState, render_overlay
 
 __all__ = [
     "BoxPrompt",
@@ -25,6 +23,7 @@ __all__ = [
     "InferencePipeline",
     "InferenceSettings",
     "MedSAM2Service",
+    "ModelConfig",
     "PredictionResult",
     "PromptState",
     "render_overlay",

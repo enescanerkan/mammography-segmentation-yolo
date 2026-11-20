@@ -18,8 +18,15 @@ import numpy as np
 from ... import __version__
 from ...imaging import DicomError, read_dicom
 from ...inference import EngineError, LandmarkEngine, ModelLoader
-from ...positioning import (CRITERIA_VERSION, CriteriaGrader, LabelError, PositioningAssessor, apply_labels, build_report,
-                            clean_labels)
+from ...positioning import (
+    CRITERIA_VERSION,
+    CriteriaGrader,
+    LabelError,
+    PositioningAssessor,
+    apply_labels,
+    build_report,
+    clean_labels,
+)
 from ...positioning import clean_rules as _clean_rules
 from ...positioning.study import labels_of
 from ...registry import Registry

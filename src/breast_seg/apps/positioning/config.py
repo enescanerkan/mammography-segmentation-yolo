@@ -16,10 +16,10 @@ from ...positioning.config import (
     DEFAULT_CRITERIA,
     DEFAULT_SEVERE_MM,
     DEFAULT_THRESHOLD_MM,
+    RETIRED_CRITERIA,
     SEVERE_BOUNDS_MM,
     THRESHOLD_BOUNDS_MM,
     Rules,
-    RETIRED_CRITERIA,
     default_criteria,
 )
 from ...positioning.report import LANGUAGES

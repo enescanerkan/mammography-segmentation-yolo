@@ -16,8 +16,8 @@ from breast_seg.apps.positioning import AppConfig, ConfigError, app_config_from_
 from breast_seg.apps.positioning.storage import StudyStore  # noqa: E402
 from breast_seg.apps.positioning.uploads import InMemoryMultipartReader, UploadError  # noqa: E402
 from breast_seg.imaging.phantom import phantom_dicom  # noqa: E402
-from breast_seg.positioning import CRITERIA_VERSION  # noqa: E402
 from breast_seg.inference.testing import fake_loader, placeholder_weights  # noqa: E402
+from breast_seg.positioning import CRITERIA_VERSION  # noqa: E402
 
 REPO = Path(__file__).resolve().parents[1]
 MODELS_YAML = REPO / "configs" / "models.yaml"
@@ -339,12 +339,14 @@ def test_example_config(tmp_path):
     assert config.weights_root is None and config.models.device == "cpu" and config.language == "en"
     assert config.criteria == {"pectoral_below_nipple_mm": {"good": 0, "acceptable": -10}}
     overridden = load_app_config(REPO / "configs" / "app.example.yaml",
-                                 ["models.device=0", "server.port=9001", "criteria.pectoral_below_nipple_mm={good: 5, acceptable: 0}",
+                                 ["models.device=0", "server.port=9001",
+                                  "criteria.pectoral_below_nipple_mm={good: 5, acceptable: 0}",
                                   "criteria.sharpness={good: 1, acceptable: 0}"])
     assert overridden.models.device == "0" and overridden.server.port == 9001
     assert overridden.criteria["pectoral_below_nipple_mm"] == {"good": 5, "acceptable": 0}
     assert "sharpness" not in overridden.criteria  # a retired band is ignored, not refused
-    assert "pectoral_angle_deg" not in load_app_config(None, ["criteria.pectoral_angle_deg={good: [1, 2], acceptable: [0, 3]}"]).criteria
+    retired = load_app_config(None, ["criteria.pectoral_angle_deg={good: [1, 2], acceptable: [0, 3]}"])
+    assert "pectoral_angle_deg" not in retired.criteria
 
 
 @pytest.mark.parametrize("data,message", [

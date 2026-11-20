@@ -83,7 +83,8 @@ models:
     weights: detector/manual_detector.pt
     classes: [Mass, Calcification]
     conf: 0.25
-    enabled: true
+    # Off since 2026-11-20: the review app no longer shows mass / calcification boxes.
+    enabled: false
 
   # Box-prompted MedSAM2 fine-tune (about 400 MB). Declared so the registry stays the single source of truth;
   # not served by the review app yet (the box-prompt screen is the next phase).

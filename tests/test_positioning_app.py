@@ -16,6 +16,7 @@ from breast_seg.apps.positioning import AppConfig, ConfigError, app_config_from_
 from breast_seg.apps.positioning.storage import StudyStore  # noqa: E402
 from breast_seg.apps.positioning.uploads import InMemoryMultipartReader, UploadError  # noqa: E402
 from breast_seg.imaging.phantom import phantom_dicom  # noqa: E402
+from breast_seg.positioning import CRITERIA_VERSION  # noqa: E402
 from breast_seg.inference.testing import fake_loader, placeholder_weights  # noqa: E402
 
 REPO = Path(__file__).resolve().parents[1]
@@ -71,6 +72,7 @@ def test_client_is_served(client):
     assert index.status_code == 200 and "<title>Mammography Positioning Review</title>" in index.text
     assert index.headers["cache-control"].startswith("no-store")
     for path in ("/static/app.css", "/static/theme.css", "/static/js/main.js", "/static/js/i18n.js",
+                 "/static/js/dataset.js", "/static/js/api.js", "/static/js/editor.js", "/static/js/overlay.js",
                  "/static/vendor/tabler/tabler.min.css", "/static/assets/icon.svg"):
         response = client.get(path)
         assert response.status_code == 200, path
@@ -185,6 +187,44 @@ def test_list_get_image_delete(client, study):
     assert client.delete(f"/api/studies/{study['id']}").status_code == 404
 
 
+def _stale(client, study, version):
+    """Rewrite the stored record as if an older (or newer) app had saved it."""
+    store = client.app.state.service.store
+    record = store.load(study["id"])
+    record["criteria"]["version"] = version
+    for image in record["images"]:
+        image["criteria"] = [{"id": "sharpness", "name": "Focus", "grade": "poor", "value": 1.0, "unit": "",
+                              "detail": "", "view_key": image["view_key"], "estimated": False}]
+    record["summary"]["marker"] = "as stored"                  # anything a recompute would drop
+    store.save(study["id"], record)
+    return record
+
+
+def test_stale_record_regrades_criteria_in_memory_only(client, study):
+    stored = _stale(client, study, 1)
+    served = client.get(f"/api/studies/{study['id']}").json()
+    assert served["criteria"]["version"] == CRITERIA_VERSION
+    assert all(entry["id"] != "sharpness" for image in served["images"] for entry in image["criteria"])
+    assert served["summary"] == stored["summary"] and served["rules"] == stored["rules"]
+    assert [image["measures"] for image in served["images"]] == [image["measures"] for image in stored["images"]]
+    assert client.app.state.service.store.load(study["id"]) == stored     # nothing written back by a read
+
+
+def test_newer_record_is_served_untouched(client, study):
+    stored = _stale(client, study, 99)
+    assert client.get(f"/api/studies/{study['id']}").json() == stored
+
+
+def test_failed_regrade_serves_the_stored_record(client, study, monkeypatch):
+    stored = _stale(client, study, 1)
+
+    def broken(record):
+        raise RuntimeError("regrade failed")
+
+    monkeypatch.setattr(client.app.state.service.assessor, "regrade", broken)
+    assert client.get(f"/api/studies/{study['id']}").json() == stored
+
+
 def test_unknown_and_malformed_ids(client):
     for path in ("/api/studies/doesnotexist", "/api/studies/..%2Fetc", "/api/studies/abc/labels",
                  "/api/studies/abc/report"):
@@ -297,12 +337,14 @@ def test_example_config(tmp_path):
     assert config.registry_path.resolve() == MODELS_YAML.resolve()
     assert config.data_dir.resolve() == (REPO / "data").resolve()
     assert config.weights_root is None and config.models.device == "cpu" and config.language == "en"
-    assert config.criteria["sharpness"] == {"good": 820, "acceptable": 330}
+    assert config.criteria == {"pectoral_below_nipple_mm": {"good": 0, "acceptable": -10}}
     overridden = load_app_config(REPO / "configs" / "app.example.yaml",
-                                 ["models.device=0", "server.port=9001", "criteria.sharpness={good: 1, acceptable: 0}"])
+                                 ["models.device=0", "server.port=9001", "criteria.pectoral_below_nipple_mm={good: 5, acceptable: 0}",
+                                  "criteria.sharpness={good: 1, acceptable: 0}"])
     assert overridden.models.device == "0" and overridden.server.port == 9001
-    assert overridden.criteria["sharpness"] == {"good": 1, "acceptable": 0}
-    assert overridden.criteria["symmetry_mm"] == {"good": 10, "acceptable": 20}
+    assert overridden.criteria["pectoral_below_nipple_mm"] == {"good": 5, "acceptable": 0}
+    assert "sharpness" not in overridden.criteria  # a retired band is ignored, not refused
+    assert "pectoral_angle_deg" not in load_app_config(None, ["criteria.pectoral_angle_deg={good: [1, 2], acceptable: [0, 3]}"]).criteria
 
 
 @pytest.mark.parametrize("data,message", [

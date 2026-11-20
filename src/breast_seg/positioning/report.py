@@ -13,6 +13,8 @@ from __future__ import annotations
 import time
 from typing import Any, Dict, List, Mapping, Tuple
 
+from .criteria import INFO
+
 LANGUAGES = ("en", "tr")
 DEFAULT_LANGUAGE = "en"
 
@@ -39,15 +41,16 @@ WORDS: Dict[str, Dict[str, Any]] = {
         "wide": "Same verdict, but the measurements differ by {gap} mm.",
         "no_pair": "No measurement: {reason}.",
         "criteria": "Positioning criteria",
-        "quality_score": "Criterion score",
         "conclusion": "Conclusion",
         "all_good": "All criteria fall within acceptable limits.",
         "no_delta": "ΔD could not be computed for either breast — no measurable MLO–CC pair.",
         "repeat": "A repeat {view} is advised.",
         "review": "The findings below should be reviewed.",
-        "grades": {"good": "adequate", "acceptable": "borderline", "poor": "inadequate", "na": "not measurable"},
+        "grades": {"good": "adequate", "acceptable": "borderline", "poor": "inadequate", "na": "not measurable",
+                   "info": "information"},
+        "mlo_alone": {"adequate": "adequate", "inadequate": "inadequate"},
         "edited": "Labels were corrected by a reviewer.",
-        "footer": "For research use; not for diagnostic purposes. Values marked estimated are excluded from the score.",
+        "footer": "For research use; not for diagnostic purposes. Values marked information are shown ungraded.",
         "problems": "Upload notes",
     },
     "tr": {
@@ -72,16 +75,17 @@ WORDS: Dict[str, Dict[str, Any]] = {
         "wide": "Kararlar aynı ama ölçümler {gap} mm ayrışıyor.",
         "no_pair": "Ölçüm yapılamadı: {reason}.",
         "criteria": "Pozisyonlama kriterleri",
-        "quality_score": "Kriter skoru",
         "conclusion": "Sonuç",
         "all_good": "Tüm kriterler yeterli sınırlar içinde.",
         "no_delta": "ΔD hiçbir meme için hesaplanamadı — ölçülebilen bir MLO–CC çifti yok.",
         "repeat": "{view} tekrarı önerilir.",
         "review": "Aşağıdaki bulgular gözden geçirilmelidir.",
-        "grades": {"good": "yeterli", "acceptable": "sınırda", "poor": "yetersiz", "na": "ölçülemedi"},
+        "grades": {"good": "yeterli", "acceptable": "sınırda", "poor": "yetersiz", "na": "ölçülemedi",
+                   "info": "bilgi"},
+        "mlo_alone": {"adequate": "yeterli", "inadequate": "yetersiz"},
         "edited": "Etiketler bir kullanıcı tarafından düzeltilmiştir.",
-        "footer": "Araştırma amaçlıdır; tanısal kullanım için değildir. Tahmini olarak işaretlenen değerler skora "
-                  "dahil edilmez.",
+        "footer": "Araştırma amaçlıdır; tanısal kullanım için değildir. Bilgi olarak işaretlenen değerler "
+                  "derecelendirilmez.",
         "problems": "Yükleme notları",
     },
 }
@@ -92,36 +96,16 @@ NAMES: Dict[str, Dict[str, str]] = {
     "en": {
         "pectoral_angle": "Pectoral angle",
         "pectoral_depth": "Pectoral reaches nipple level",
-        "imf": "Inframammary fold open",
-        "nipple_profile": "Nipple in profile",
         "nipple_centred": "Nipple centred",
-        "cc_pectoral": "Pectoral visible on CC",
-        "sharpness": "Focus",
-        "exposure": "Exposure",
-        "symmetry_mlo": "PNL symmetry",
-        "symmetry_cc": "Chest-wall distance symmetry",
-        "compression_force": "Compression force",
-        "thickness": "Compressed thickness",
-        "compression_pressure": "Compression pressure (estimated)",
+        "mlo_alone": "MLO alone",
         "gantry": "Gantry angle",
-        "dose": "Entrance dose",
     },
     "tr": {
         "pectoral_angle": "Pektoral açı",
         "pectoral_depth": "Pektoral meme ucu seviyesine iniyor",
-        "imf": "İnframammer katlantı açık",
-        "nipple_profile": "Meme ucu profilde",
         "nipple_centred": "Meme ucu ortalanmış",
-        "cc_pectoral": "CC'de pektoral görünür",
-        "sharpness": "Odak",
-        "exposure": "Pozlama",
-        "symmetry_mlo": "PNL simetrisi",
-        "symmetry_cc": "Göğüs duvarı mesafesi simetrisi",
-        "compression_force": "Sıkıştırma kuvveti",
-        "thickness": "Sıkıştırılmış kalınlık",
-        "compression_pressure": "Sıkıştırma basıncı (tahmini)",
+        "mlo_alone": "MLO tek başına",
         "gantry": "C-kol açısı",
-        "dose": "Giriş dozu",
     },
 }
 
@@ -226,17 +210,16 @@ def _side_rows(side: Mapping[str, Any], words: Mapping[str, Any], reasons: Mappi
 
 def _criterion_value(entry: Mapping[str, Any], words: Mapping[str, Any]) -> str:
     value = "" if entry["value"] is None else "{}{}".format(entry["value"], entry["unit"])
+    if entry["id"] == "mlo_alone" and entry["value"] in words["mlo_alone"]:
+        value = words["mlo_alone"][entry["value"]]
+    if entry["grade"] == INFO:
+        return value  # shown for information; a grade word would read as a verdict
     return "{} · {}".format(value, words["grades"][entry["grade"]]).strip(" ·")
 
 
 def _criteria_rows(record: Mapping[str, Any], words: Mapping[str, Any],
                    names: Mapping[str, str]) -> List[Dict[str, Any]]:
     rows: List[Dict[str, Any]] = []
-    summary = (record.get("criteria") or {}).get("summary") or {}
-    if summary.get("score") is not None:
-        rows.append({"label": words["quality_score"], "value": "{:g} / 100".format(summary["score"]),
-                     "grade": summary.get("worst"), "strong": True})
-
     for image in record.get("images") or []:
         items = [entry for entry in image.get("criteria", []) if entry["grade"] != "na"]
         if not items:
@@ -244,7 +227,8 @@ def _criteria_rows(record: Mapping[str, Any], words: Mapping[str, Any],
         rows.append({"label": image["view_key"], "value": "", "strong": True})
         for entry in items:
             rows.append({"label": "   " + names.get(entry["id"], entry["name"]),
-                         "value": _criterion_value(entry, words), "grade": entry["grade"]})
+                         "value": _criterion_value(entry, words),
+                         "grade": None if entry["grade"] == INFO else entry["grade"]})
 
     for entry in (record.get("criteria") or {}).get("study", []):
         if entry["grade"] == "na":
@@ -272,7 +256,7 @@ def _conclusion(record: Mapping[str, Any], words: Mapping[str, Any], names: Mapp
     if not measured:
         lines.append(words["no_delta"])
 
-    # Estimates are kept out of the score, so they cannot ask for a repeat either.
+    # Only graded measurements ask for a repeat: never an estimate, never an information value.
     poor: List[Tuple[str, Mapping[str, Any]]] = []
     for image in record.get("images") or []:
         for entry in image.get("criteria", []):

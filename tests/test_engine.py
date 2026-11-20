@@ -39,9 +39,8 @@ def test_loads_the_role_models(registry):
     engine = _engine(registry)
     status = engine.status()
     assert engine.ready and status["errors"] == {}
-    assert status["loaded"] == ["lesion_det", "pose_cc", "pose_mlo", "seg_v4"]
-    assert status["roles"] == {"pose_mlo": "pose_mlo", "pose_cc": "pose_cc", "segmentation": "seg_v4",
-                               "detection": "lesion_det"}
+    assert status["loaded"] == ["pose_cc", "pose_mlo", "seg_v4"]  # lesion_det is disabled in the registry
+    assert status["roles"]["segmentation"] == "seg_v4" and not status["roles"].get("detection")
     assert status["device"] == "cpu"
     assert engine.loaded_weights()["seg_v4"] == "breast_seg_v4_yolo26m.pt"
 
@@ -61,10 +60,10 @@ def test_analyse_mlo(registry):
         assert mask.shape == (TARGET_SIZE, TARGET_SIZE) and mask.dtype == np.uint8
         polygon = out["polygons"][name]["points"]
         assert len(polygon) >= 3 and all(0 <= c <= TARGET_SIZE for point in polygon for c in point)
-    assert out["lesions"][0]["label"] == "Mass" and len(out["lesions"][0]["box"]) == 4
+    assert out["lesions"] == []  # no lesion detector is served
     # every model call ran on the configured device, at the trained input size
     models = engine._models
-    assert models["pose_mlo"].calls and models["seg_v4"].calls and models["lesion_det"].calls
+    assert models["pose_mlo"].calls and models["seg_v4"].calls and "lesion_det" not in models
     assert not models["pose_cc"].calls
     for model in models.values():
         assert all(call["device"] == "cpu" and call["imgsz"] == TARGET_SIZE for call in model.calls)

@@ -16,12 +16,10 @@ export const LAYERS = [
   { id: 'points', label: 'layer_points', key: 'nipple_point', kind: 'points' },
   { id: 'measure_landmark', label: 'c_measure_landmark', key: 'measure_landmark', kind: 'measure', route: 'landmark' },
   { id: 'measure_mask', label: 'c_measure_mask', key: 'measure_mask', kind: 'measure', route: 'mask' },
-  { id: 'lesion', label: 'layer_lesion', key: 'Mass', kind: 'boxes' },
 ];
 
 export const layerName = (layer) => t(layer.label);
 export const layerColor = (layer) => appearance.colorOf(layer.key);
-export const lesionName = (label) => t(`lesion_${label}`, {}, label);
 
 /**
  * @param {CanvasRenderingContext2D} ctx  already translated/scaled to image space
@@ -40,7 +38,6 @@ export function drawOverlay(ctx, image, visible, scale) {
     if (layer.kind === 'polygon') drawPolygon(ctx, image, layer, unit);
     else if (layer.kind === 'points') drawPoints(ctx, image, unit);
     else if (layer.kind === 'measure') drawMeasure(ctx, image, layer, unit);
-    else if (layer.kind === 'boxes') drawBoxes(ctx, image, unit);
   }
 
   ctx.restore();
@@ -126,22 +123,6 @@ function drawMeasure(ctx, image, layer, unit) {
   }
 
   label(ctx, `${measure.mm.toFixed(1)} mm`, (x1 + x2) / 2 + 8 * unit, (y1 + y2) / 2 - 8 * unit, color, unit);
-}
-
-function drawBoxes(ctx, image, unit) {
-  (image.lesions || []).forEach((lesion, index) => {
-    const color = appearance.colorOf(lesion.label, '#ff5fb0');
-    const [x1, y1, x2, y2] = lesion.box;
-    ctx.beginPath();
-    ctx.rect(x1, y1, x2 - x1, y2 - y1);
-    ctx.strokeStyle = color;
-    ctx.lineWidth = 1.8 * unit;
-    ctx.setLineDash([5 * unit, 4 * unit]);
-    ctx.stroke();
-    ctx.setLineDash([]);
-    const name = `${lesionName(lesion.label)} ${index + 1}`;
-    label(ctx, `${name} · ${(lesion.confidence * 100).toFixed(0)}%`, x1, y1 - 5 * unit, color, unit);
-  });
 }
 
 export function label(ctx, text, x, y, color, unit) {

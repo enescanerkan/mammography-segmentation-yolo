@@ -6,6 +6,7 @@ whole flow can be exercised — and tested — without a web server.
 """
 from __future__ import annotations
 
+import copy
 import logging
 import threading
 import time
@@ -17,7 +18,8 @@ import numpy as np
 from ... import __version__
 from ...imaging import DicomError, read_dicom
 from ...inference import EngineError, LandmarkEngine, ModelLoader
-from ...positioning import CriteriaGrader, LabelError, PositioningAssessor, apply_labels, build_report, clean_labels
+from ...positioning import (CRITERIA_VERSION, CriteriaGrader, LabelError, PositioningAssessor, apply_labels, build_report,
+                            clean_labels)
 from ...positioning import clean_rules as _clean_rules
 from ...positioning.study import labels_of
 from ...registry import Registry
@@ -127,11 +129,20 @@ class PositioningService:
 
     def study(self, study_id: str) -> Dict[str, Any]:
         record = self._load(study_id)
-        # Studies saved before a measurement existed carry none; fill them in on the way out rather than leaving
-        # the reviewer with a panel that is silently empty.
-        if "criteria" not in record:
-            self.assessor.recompute(record)
-            self.store.save(study_id, record)
+        stored = (record.get("criteria") or {}).get("version")
+        if not isinstance(stored, int) or stored < CRITERIA_VERSION:
+            # Saved under an older criteria set, or before criteria existed: regrade for this response only. Nothing
+            # is written back, so a read can never overwrite a concurrent edit, and the stored ΔD and verdicts stay as
+            # they were measured. The next edit (labels or threshold) saves a fully recomputed record anyway.
+            try:
+                upgraded = copy.deepcopy(record)
+                if "summary" in upgraded:
+                    self.assessor.regrade(upgraded)
+                else:  # never measured at all: there is no stored ΔD or verdict to preserve
+                    self.assessor.recompute(upgraded)
+                record = upgraded
+            except Exception:  # noqa: BLE001 - the stored record is still worth showing
+                log.warning("could not regrade study %s, serving it as stored: %s", study_id, traceback.format_exc())
         return record
 
     def labels(self, study_id: str) -> Dict[str, Any]:

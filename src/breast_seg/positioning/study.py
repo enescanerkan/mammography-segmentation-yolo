@@ -12,7 +12,7 @@ from typing import Any, Dict, List, Mapping, Optional
 
 from . import measures
 from .config import Rules
-from .criteria import CriteriaGrader
+from .criteria import CRITERIA_VERSION, CriteriaGrader
 
 FRAME = 640
 
@@ -47,6 +47,7 @@ class PositioningAssessor:
             "lesions": analysis["lesions"],
             "quality": analysis["quality"],
             "physics": meta.get("physics") or {},
+            "transform": analysis.get("transform"),  # 640 frame -> original pixels (the MLO-alone verdict needs it)
         }
         return self.remeasure(image)
 
@@ -71,15 +72,31 @@ class PositioningAssessor:
         }
 
     def recompute(self, record: Dict[str, Any]) -> Dict[str, Any]:
-        """Remeasure every image, then the verdicts, the study criteria and the score (in place)."""
+        """Remeasure every image, then the verdicts and the criteria (in place)."""
         rules = self.rules_of(record)
         for image in record["images"]:
             self.remeasure(image)
         record["summary"] = measures.summarise(record["images"], rules["threshold_mm"], rules["severe_mm"])
         study_items = self.grader.for_study(record["images"])
         every = [entry for image in record["images"] for entry in image.get("criteria", [])] + study_items
-        record["criteria"] = {"study": study_items, "summary": self.grader.summarise(every)}
+        record["criteria"] = {"study": study_items, "summary": self.grader.summarise(every),
+                              "version": CRITERIA_VERSION}
         record["rules"] = rules
+        return record
+
+    def regrade(self, record: Dict[str, Any]) -> Dict[str, Any]:
+        """Recompute the criteria only, from the labels and measurements the record already holds (in place).
+
+        For records saved under an older criteria set: the ΔD measurements, the verdicts and the rules are left
+        exactly as stored — only the criteria lists, the study items and their counts are rebuilt.
+        """
+        for image in record["images"]:
+            masks = measures.masks_from_polygons(image.get("polygons") or {}, FRAME)
+            image["criteria"] = self.grader.for_image(image, masks)
+        study_items = self.grader.for_study(record["images"])
+        every = [entry for image in record["images"] for entry in image.get("criteria", [])] + study_items
+        record["criteria"] = {"study": study_items, "summary": self.grader.summarise(every),
+                              "version": CRITERIA_VERSION}
         return record
 
     def new_record(self, study_id: str, images: List[Dict[str, Any]], problems: List[str],

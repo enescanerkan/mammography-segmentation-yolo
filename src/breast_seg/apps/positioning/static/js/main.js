@@ -7,6 +7,7 @@ import { drawOverlay, FRAME, LAYERS, layerColor, layerName } from './overlay.js'
 import { appearance } from './appearance.js';
 import { Lightbox } from './lightbox.js';
 import { Editor } from './editor.js';
+import { buildDataset, DICOM_EXT, pathOf, usableFiles } from './dataset.js';
 import {
   criterionDetail, criterionName, language, locale, onLanguage, reason, savedLanguage, setLanguage, t,
 } from './i18n.js';
@@ -55,6 +56,16 @@ const ui = {
   chooseFolder: el('choose-folder'),
   fileInput: el('file-input'),
   folderInput: el('folder-input'),
+  chooseDataset: el('choose-dataset'),
+  datasetInput: el('dataset-input'),
+  datasetNav: el('dataset-nav'),
+  datasetPrev: el('dataset-prev'),
+  datasetNext: el('dataset-next'),
+  datasetPick: el('dataset-pick'),
+  datasetState: el('dataset-state'),
+  datasetName: el('dataset-name'),
+  datasetSkipped: el('dataset-skipped'),
+  datasetClose: el('dataset-close'),
   uploadIdle: el('upload-idle'),
   uploadBusy: el('upload-busy'),
   uploadCount: el('upload-count'),
@@ -87,7 +98,6 @@ const ui = {
   colorGrid: el('color-grid'),
   styleReset: el('style-reset'),
   criteriaToggle: el('criteria-toggle'),
-  scoreChip: el('score-chip'),
   criteriaDrawer: el('criteria-drawer'),
   criteriaGrid: el('criteria-grid'),
   criteriaCounts: el('criteria-counts'),
@@ -143,6 +153,7 @@ const state = {
   pairing: null,
   report: null,
   reportLang: loadPref(REPORT_LANG_KEY, null), // null: follow the interface language
+  dataset: null, // { name, studies: [{name, files}], index, ids: Map, jobs: Map, failed: Set, finished }
 };
 
 const LAYOUT_NAMES = { '1x1': 'layout_1x1', '2x1': 'layout_2x1', '1x2': 'layout_1x2', '2x2': 'layout_2x2' };
@@ -152,8 +163,6 @@ const COLOR_FIELDS = [
   ['pectoral', 'c_pectoral'],
   ['nipple', 'c_nipple'],
   ['nipple_point', 'c_landmarks'],
-  ['Mass', 'c_mass'],
-  ['Calcification', 'c_calc'],
   ['measure_landmark', 'c_measure_landmark'],
   ['measure_mask', 'c_measure_mask'],
 ];
@@ -311,8 +320,9 @@ const editor = new Editor({
 // ── small helpers ──────────────────────────────────────────────────────────
 function saveLayerPrefs() { savePref(LAYER_STORAGE_KEY, JSON.stringify([...state.visible])); }
 
-function showError(message) {
+function showError(message, tone = 'error') {
   ui.bannerText.textContent = message;
+  ui.banner.dataset.tone = tone;
   ui.banner.hidden = false;
 }
 
@@ -435,8 +445,6 @@ function updateSplash(health) {
   const both = [role('pose_mlo'), role('pose_cc')];
   stepState('sp-pose', both.includes('err') ? 'err' : (both.every((s) => s === 'ok') ? 'ok' : ''));
   stepState('sp-seg', role('segmentation'));
-  if (!roles.detection) stepState('sp-lesion', health.loading ? '' : 'skip');
-  else stepState('sp-lesion', role('detection'));
 }
 
 function applyHealth(health) {
@@ -487,6 +495,8 @@ function relabel() {
   ui.appTitle.textContent = appTitle();
   buildLayerBar();
   buildCellGrid();
+  renderDatasetPicker();
+  renderDatasetNav();
   renderPairingButtons();
   if (!colorEditing) buildColorGrid();
   renderStatus();
@@ -551,6 +561,19 @@ function wireEvents() {
     ui.folderInput.value = '';
     if (files.length) upload(pickLikelyDicoms(files));
   });
+  ui.chooseDataset.addEventListener('click', (event) => { event.stopPropagation(); ui.datasetInput.click(); });
+  ui.datasetInput.addEventListener('change', () => {
+    const files = [...ui.datasetInput.files];
+    ui.datasetInput.value = '';
+    if (files.length) openDataset(files);
+  });
+  ui.datasetPrev.addEventListener('click', () => stepStudy(-1));
+  ui.datasetNext.addEventListener('click', () => stepStudy(1));
+  ui.datasetPick.addEventListener('change', () => {
+    ui.datasetPick.blur(); // PageDown must move the study, not the native list
+    goToStudy(Number(ui.datasetPick.value));
+  });
+  ui.datasetClose.addEventListener('click', () => { closeDataset(); startNewStudy(); });
 
   ui.clearHistory.addEventListener('click', clearHistory);
 
@@ -581,7 +604,7 @@ function wireEvents() {
   window.addEventListener('drop', (event) => event.preventDefault());
 
   ui.uploadCancel.addEventListener('click', cancelUpload);
-  ui.newStudy.addEventListener('click', startNewStudy);
+  ui.newStudy.addEventListener('click', () => { closeDataset(); startNewStudy(); });
   ui.openEditor.addEventListener('click', openEditor);
   ui.downloadLabels.addEventListener('click', downloadLabels);
   ui.deleteStudy.addEventListener('click', deleteCurrent);
@@ -657,6 +680,11 @@ function wireEvents() {
   });
   document.addEventListener('keydown', (event) => {
     if (event.key === 'Escape') closePopovers();
+    if (state.dataset && !isTyping(event.target) && !panelOpen()) {
+      const forward = event.key === 'PageDown' || (event.shiftKey && event.key === 'ArrowRight');
+      const back = event.key === 'PageUp' || (event.shiftKey && event.key === 'ArrowLeft');
+      if (forward || back) { event.preventDefault(); stepStudy(forward ? 1 : -1); return; }
+    }
     if (state.screen !== 'review' || event.target instanceof HTMLInputElement) return;
     if (!el('editor').hidden || !el('lightbox').hidden) return;
     if (event.key === 'ArrowLeft') turnPage(-1);
@@ -677,12 +705,21 @@ function wireEvents() {
   });
 }
 
+/** Focus is somewhere a key belongs to the field, not to the page. */
+function isTyping(target) {
+  return target instanceof HTMLInputElement || target instanceof HTMLSelectElement
+    || target instanceof HTMLTextAreaElement || Boolean(target && target.isContentEditable);
+}
+
+/** An overlay, drawer or popover is open: page-level shortcuts stay quiet. */
+function panelOpen() {
+  return [el('editor'), el('lightbox'), ui.criteriaDrawer, ui.reportPanel, ui.notesPop, ui.layoutPop, ui.stylePop]
+    .some((node) => node && !node.hidden);
+}
+
 // ── upload ─────────────────────────────────────────────────────────────────
 const VIEW_IN_PATH = /(^|[^a-z])(?:[lr][\W_]*)?(?:mlo|cc)([^a-z]|$)/i;
-const DICOM_EXT = /\.(dcm|dicom|ima)$/i;
-// A study folder usually ships more than images: label sidecars, reports, thumbnails, OS junk. These never contain
-// pixel data, and sending them only produces a per-file error the reader then has to decode.
-const NOT_AN_IMAGE = /\.(txt|json|csv|tsv|xml|ya?ml|md|pdf|docx?|xlsx?|zip|gz|log|ini|png|jpe?g|gif|bmp|tiff?|svg|webp|mp4|avi|db|sqlite)$/i;
+const uploadLimit = () => (state.health && state.health.upload && state.health.upload.max_files) || 40;
 
 /** Depth-first walk of dropped directory entries, keeping the relative path. */
 async function collectFiles(entries, prefix = '') {
@@ -716,19 +753,14 @@ async function collectFiles(entries, prefix = '') {
  * that send what there is and let the server explain itself per file.
  */
 function pickLikelyDicoms(files) {
-  const limit = (state.health && state.health.upload && state.health.upload.max_files) || 40;
-  const named = (file) => file.webkitRelativePath || file.relativePath || file.name;
-  const usable = files.filter((file) => {
-    const path = named(file);
-    const base = path.split('/').pop();
-    return file.size > 0 && !base.startsWith('.') && !NOT_AN_IMAGE.test(base);
-  });
+  const limit = uploadLimit();
+  const usable = usableFiles(files);
 
   // Prefer files whose path names a view, but only among things that could be images — a labels/ sidecar inside
   // RMLO/ matches the view too.
-  const byView = usable.filter((file) => VIEW_IN_PATH.test(named(file)));
+  const byView = usable.filter((file) => VIEW_IN_PATH.test(pathOf(file)));
   if (byView.length) return byView.slice(0, limit);
-  const byExt = usable.filter((file) => DICOM_EXT.test(named(file)));
+  const byExt = usable.filter((file) => DICOM_EXT.test(pathOf(file)));
   return (byExt.length ? byExt : usable).slice(0, limit);
 }
 
@@ -736,6 +768,14 @@ async function clearHistory() {
   if (!window.confirm(t('clear_confirm'))) return;
   try {
     const { deleted } = await api.deleteAll();
+    if (state.dataset) {
+      // The dataset list stays; every study in it is analysed again when it is reached.
+      const dataset = state.dataset;
+      dataset.ids.clear();
+      dataset.jobs.clear();
+      renderDatasetPicker();
+      renderDatasetNav();
+    }
     if (state.study) startNewStudy();
     else await refreshHistory();
     showError(deleted === 1 ? t('deleted_1') : t('deleted_n', { n: deleted }));
@@ -847,6 +887,208 @@ function startNewStudy() {
   refreshHistory();
 }
 
+// ── dataset ────────────────────────────────────────────────────────────────
+// A folder of many studies, reviewed one study at a time. Studies are analysed only when reached; the next one is
+// analysed in the background while the current one is on screen, so moving on is usually instant. Closing the
+// dataset aborts whatever is still in flight.
+
+async function openDataset(files) {
+  if (state.busy) { showError(t('busy_wait')); return; }
+  clearError();
+  closeDataset();
+  state.busy = true;
+  ui.progressText.textContent = t('ds_scanning', { d: 0, n: files.length });
+  show('processing');
+  let dataset;
+  try {
+    dataset = await buildDataset(files, (done, total) => {
+      ui.progressText.textContent = t('ds_scanning', { d: done, n: total });
+    });
+  } finally {
+    state.busy = false;
+  }
+  if (!dataset.studies.length) {
+    show(state.study ? 'review' : 'landing');
+    showError(t('ds_empty'));
+    return;
+  }
+  state.dataset = {
+    ...dataset,
+    index: 0,                 // the study on screen (moves only once the next one is shown)
+    target: null,             // the study being opened
+    moving: false,
+    finished: false,
+    ids: new Map(),           // index -> stored study id
+    jobs: new Map(),          // index -> analysis promise
+    opened: new Set(),
+    failed: new Set(),
+    removed: new Set(),
+    aborter: new AbortController(),
+  };
+  renderDatasetPicker();
+  goToStudy(0);
+}
+
+function closeDataset() {
+  if (state.dataset) state.dataset.aborter.abort();
+  state.dataset = null;
+  ui.datasetNav.hidden = true;
+}
+
+/** Forget a study's stored record, so reaching it again analyses it again. */
+function forgetStudy(dataset, index) {
+  dataset.ids.delete(index);
+  dataset.jobs.delete(index);
+}
+
+/** The stored study id of dataset study `index`, analysing it first if nobody has yet. */
+function ensureStudy(index) {
+  const dataset = state.dataset;
+  if (!dataset || index < 0 || index >= dataset.studies.length) return Promise.resolve(null);
+  if (!dataset.jobs.has(index)) {
+    // The files were sorted out when the dataset was built; only the server's per-upload cap applies here.
+    const files = dataset.studies[index].files.slice(0, uploadLimit());
+    const job = api.createStudy(files, { signal: dataset.aborter.signal }).then((record) => {
+      dataset.ids.set(index, record.id);
+      if (state.dataset === dataset) updateDatasetOption(index);
+      return record.id;
+    });
+    job.catch(() => { if (dataset.jobs.get(index) === job) dataset.jobs.delete(index); }); // tried again when reached
+    dataset.jobs.set(index, job);
+  }
+  return dataset.jobs.get(index);
+}
+
+function stepStudy(step) {
+  const dataset = state.dataset;
+  if (!dataset || dataset.moving) return;
+  const target = dataset.index + step;
+  if (target >= dataset.studies.length) { finishDataset(); return; }
+  if (target >= 0) goToStudy(target);
+}
+
+async function goToStudy(index, retried = false) {
+  const dataset = state.dataset;
+  if (!dataset || dataset.moving || index < 0 || index >= dataset.studies.length) return;
+  if (state.busy) { showError(t('busy_wait')); return; }
+  dataset.moving = true;
+  dataset.target = index;
+  clearError();
+  renderDatasetNav();
+  ui.progressText.textContent = t('ds_analysing', { i: index + 1, n: dataset.studies.length });
+  show('processing');
+
+  let outcome = { ok: false };
+  try {
+    let studyId;
+    try {
+      studyId = await ensureStudy(index);
+    } catch (error) {
+      if (state.dataset !== dataset) return; // closed while it was analysed
+      dataset.failed.add(index);
+      updateDatasetOption(index);
+      show(state.study ? 'review' : 'landing');
+      showError(t('ds_failed', { i: index + 1, name: dataset.studies[index].name, msg: error.message }));
+      return;
+    }
+    if (state.dataset !== dataset) return;
+    outcome = await openStudy(studyId, { signal: dataset.aborter.signal });
+  } finally {
+    dataset.moving = false;
+    dataset.target = null;
+    if (state.dataset === dataset) renderDatasetNav();
+  }
+  if (state.dataset !== dataset) return;
+
+  if (outcome.ok) {
+    dataset.index = index;
+    dataset.opened.add(index);
+    dataset.failed.delete(index);
+    dataset.removed.delete(index);
+    updateDatasetOption(index);
+    renderDatasetNav();
+    ensureStudy(index + 1).catch(() => {}); // analyse the next study while this one is read
+    return;
+  }
+  if (outcome.status === 404) {
+    // The stored record is gone (deleted, or past the retention window): analyse the files again, once.
+    forgetStudy(dataset, index);
+    if (!retried) { goToStudy(index, true); return; }
+  }
+  dataset.failed.add(index);
+  updateDatasetOption(index);
+  renderDatasetNav();
+}
+
+function finishDataset() {
+  const dataset = state.dataset;
+  if (!dataset) return;
+  dataset.finished = true;
+  renderDatasetNav();
+  const total = dataset.studies.length;
+  const opened = dataset.opened.size;
+  const failed = [...dataset.failed].filter((index) => !dataset.opened.has(index)).length;
+  showError(opened === total
+    ? t('ds_finished_all', { n: total })
+    : t('ds_finished_counts', { o: opened, n: total, f: failed, u: total - opened - failed }), 'info');
+}
+
+function datasetOptionText(dataset, index) {
+  let mark = '';
+  if (dataset.removed.has(index)) mark = ' –';
+  else if (dataset.failed.has(index)) mark = ' ✕';
+  else if (dataset.ids.has(index)) mark = ' ✓';
+  return t('ds_option', { i: index + 1, n: dataset.studies.length, name: dataset.studies[index].name }) + mark;
+}
+
+/** The whole study list: built once per dataset and per language, so an open list is never rebuilt under the user. */
+function renderDatasetPicker() {
+  const dataset = state.dataset;
+  if (!dataset) return;
+  ui.datasetPick.replaceChildren(...dataset.studies.map((_, index) => {
+    const option = document.createElement('option');
+    option.value = String(index);
+    option.textContent = datasetOptionText(dataset, index);
+    return option;
+  }));
+  ui.datasetPick.value = String(dataset.index);
+}
+
+function updateDatasetOption(index) {
+  const dataset = state.dataset;
+  const option = dataset && ui.datasetPick.options[index];
+  if (option) option.textContent = datasetOptionText(dataset, index);
+}
+
+function renderDatasetNav() {
+  const dataset = state.dataset;
+  ui.datasetNav.hidden = !dataset;
+  if (!dataset) return;
+  const total = dataset.studies.length;
+  const last = dataset.index === total - 1;
+  ui.datasetName.textContent = dataset.name;
+  ui.datasetName.title = dataset.name;
+  ui.datasetName.hidden = !dataset.name;
+  ui.datasetSkipped.textContent = dataset.skipped ? t('ds_skipped', { n: dataset.skipped }) : '';
+  if (ui.datasetPick.value !== String(dataset.index)) ui.datasetPick.value = String(dataset.index);
+  ui.datasetPick.disabled = dataset.moving;
+  ui.datasetPrev.disabled = dataset.moving || dataset.index === 0;
+  ui.datasetNext.disabled = dataset.moving || (last && dataset.finished);
+  ui.datasetNext.title = last ? t('ds_finish') : t('ds_next_title');
+  el('dataset-next-label').textContent = last ? t('ds_finish_btn') : t('ds_next_btn');
+  el('dataset-next-mark').textContent = last ? '✓' : '›';
+  let tone = '';
+  let text = '';
+  if (dataset.moving) text = t('ds_working', { i: dataset.target + 1 });
+  else if (dataset.removed.has(dataset.index) && !state.study) { tone = 'error'; text = t('ds_state_removed'); }
+  else if (dataset.failed.has(dataset.index)) { tone = 'error'; text = t('ds_state_failed'); }
+  else if (dataset.finished) { tone = 'done'; text = t('ds_done', { o: dataset.opened.size, n: total }); }
+  else if (last) text = t('ds_last');
+  ui.datasetState.textContent = text;
+  if (tone) ui.datasetState.dataset.tone = tone;
+  else delete ui.datasetState.dataset.tone;
+}
+
 // ── review ─────────────────────────────────────────────────────────────────
 /** Fetch every render of the study (in parallel), reporting how many have arrived. */
 async function loadBitmaps(study, onProgress = () => {}) {
@@ -869,10 +1111,12 @@ async function loadBitmaps(study, onProgress = () => {}) {
   }));
 }
 
-async function showStudy(study) {
+/** Show a study record; false when `signal` was aborted while its views loaded (nothing is shown then). */
+async function showStudy(study, signal) {
+  await loadBitmaps(study);
+  if (signal && signal.aborted) return false;
   state.study = study;
   state.report = null;
-  await loadBitmaps(study);
 
   ui.thresholdInput.value = String((study.rules || {}).threshold_mm ?? 10);
   renderReview(study);
@@ -881,6 +1125,7 @@ async function showStudy(study) {
   if (!ui.reportPanel.hidden) loadReport();
   if (location.hash.replace('#', '') !== study.id) history.replaceState(null, '', `#${study.id}`);
   redrawTiles();
+  return true;
 }
 
 function renderReview(study) {
@@ -1172,20 +1417,20 @@ function tileBadges(image) {
   if (landmarks.mirrored) badges.push({ text: t('badge_mirrored'), tone: 'warn', title: t('badge_mirrored_title') });
   const nipple = (image.polygons || {}).nipple;
   if (nipple && nipple.rescued) badges.push({ text: t('badge_rescued'), tone: 'warn', title: t('badge_rescued_title') });
-  if (image.lesions && image.lesions.length) {
-    const n = image.lesions.length;
-    badges.push({ text: n === 1 ? t('lesions_1') : t('lesions_n', { n }) });
-  }
   return badges;
 }
 
 function renderRails(study) {
   const sides = new Map(((study.summary || {}).sides || []).map((side) => [side.laterality, side]));
-  renderRail(ui.railR, 'R', sides.get('R'));
-  renderRail(ui.railL, 'L', sides.get('L'));
+  const mloAlone = (laterality) => {
+    const image = study.images.find((entry) => entry.view === 'MLO' && entry.laterality === laterality);
+    return image && (image.criteria || []).find((item) => item.id === 'mlo_alone');
+  };
+  renderRail(ui.railR, 'R', sides.get('R'), mloAlone('R'));
+  renderRail(ui.railL, 'L', sides.get('L'), mloAlone('L'));
 }
 
-function renderRail(node, laterality, side) {
+function renderRail(node, laterality, side, mloAlone) {
   const head = document.createElement('div');
   head.className = 'rail-head';
   const name = document.createElement('span');
@@ -1209,12 +1454,26 @@ function renderRail(node, laterality, side) {
   agreement.dataset.state = side.comparison.wide_gap ? 'wide' : side.comparison.state;
   agreement.textContent = comparisonNote(side.comparison);
 
-  node.replaceChildren(
+  const children = [
     head,
     buildVerdictCard(t('method_landmark'), 'landmark', side.landmark),
     buildVerdictCard(t('method_mask'), 'mask', side.mask),
     agreement,
-  );
+  ];
+  if (mloAlone && mloAlone.value) {
+    // Information only: the MLO judged on its own (MLO-only criterion); it never changes the ΔD verdict above.
+    const line = document.createElement('p');
+    line.className = 'mlo-alone';
+    line.dataset.value = mloAlone.value;
+    line.title = criterionDetail(mloAlone);
+    const label = document.createElement('span');
+    label.textContent = t('mlo_alone_label');
+    const value = document.createElement('strong');
+    value.textContent = criterionValue(mloAlone);
+    line.append(label, value);
+    children.push(line);
+  }
+  node.replaceChildren(...children);
 }
 
 function buildVerdictCard(title, route, result) {
@@ -1288,8 +1547,6 @@ function setDrawer(open) {
 
 function renderCriteria(study) {
   const summary = (study.criteria || {}).summary || {};
-  ui.scoreChip.textContent = summary.score === null || summary.score === undefined ? '—' : String(summary.score);
-  ui.scoreChip.dataset.grade = summary.worst || 'na';
 
   const groups = [];
   for (const viewKey of VIEW_ORDER) {
@@ -1300,7 +1557,7 @@ function renderCriteria(study) {
   if (studyItems.length) groups.push([t('both_breasts'), studyItems]);
 
   const counts = summary.counts || {};
-  ui.criteriaCounts.textContent = groups.length
+  ui.criteriaCounts.textContent = summary.graded
     ? t('criteria_counts', { g: counts.good || 0, a: counts.acceptable || 0, p: counts.poor || 0 })
     : '';
   ui.criteriaEmpty.hidden = groups.length > 0;
@@ -1338,8 +1595,7 @@ function renderCriteria(study) {
 
       const value = document.createElement('span');
       value.className = 'criterion-value';
-      value.textContent = item.value === null || item.value === undefined
-        ? gradeText(item.grade) : `${item.value}${item.unit}`;
+      value.textContent = criterionValue(item);
 
       row.append(dot, name, value);
       list.appendChild(row);
@@ -1347,6 +1603,13 @@ function renderCriteria(study) {
     card.appendChild(list);
     return card;
   }));
+}
+
+/** A criterion's value as shown: worded values (the MLO-alone verdict) are translated, numbers carry their unit. */
+function criterionValue(item) {
+  if (item.value === null || item.value === undefined) return gradeText(item.grade);
+  if (item.id === 'mlo_alone') return t(`mlo_alone_${item.value}`, {}, String(item.value));
+  return `${item.value}${item.unit}`;
 }
 
 /** The worst grade among a view's criteria, for the dot in its tile header. */
@@ -1759,20 +2022,30 @@ function buildHistoryItem(row) {
   return item;
 }
 
-async function openStudy(studyId) {
-  if (state.busy) return;
+/**
+ * Fetch a stored study and put it on screen.
+ * Resolves to { ok: true } once it is shown, or { ok: false, status?, aborted? } with the reason already displayed.
+ */
+async function openStudy(studyId, { signal } = {}) {
+  if (state.busy) { showError(t('busy_wait')); return { ok: false }; }
   clearError();
   state.busy = true;
   ui.progressText.textContent = t('opening');
   show('processing');
   try {
-    state.bitmaps.clear();
-    const study = await api.getStudy(studyId);
+    const study = await api.getStudy(studyId, { signal });
+    if (signal && signal.aborted) return { ok: false, aborted: true };
     ui.progressText.textContent = t('loading_views');
-    await showStudy(study);
+    state.bitmaps.clear();
+    const shown = await showStudy(study, signal);
+    return shown ? { ok: true } : { ok: false, aborted: true };
   } catch (error) {
-    showError(error.message);
-    show(state.study ? 'review' : 'landing');
+    const aborted = Boolean(signal && signal.aborted);
+    if (!aborted) {
+      showError(error.message);
+      show(state.study ? 'review' : 'landing');
+    }
+    return { ok: false, status: error.status, aborted };
   } finally {
     state.busy = false;
   }
@@ -1792,8 +2065,20 @@ async function deleteCurrent() {
   if (!state.study) return;
   if (!window.confirm(t('delete_confirm'))) return;
   try {
-    await api.deleteStudy(state.study.id);
+    const deleted = state.study.id;
+    await api.deleteStudy(deleted);
+    const dataset = state.dataset;
+    const entry = dataset && [...dataset.ids].find(([, id]) => id === deleted);
     startNewStudy();
+    if (entry) {
+      // Keep the dataset: mark the study removed and move on to the next one, if there is one.
+      const [index] = entry;
+      forgetStudy(dataset, index);
+      dataset.removed.add(index);
+      updateDatasetOption(index);
+      renderDatasetNav();
+      if (index === dataset.index && index + 1 < dataset.studies.length) goToStudy(index + 1);
+    }
   } catch (error) {
     showError(error.message);
   }

@@ -12,22 +12,16 @@ DEFAULT_SEVERE_MM = 15.0
 THRESHOLD_BOUNDS_MM = (1.0, 60.0)
 SEVERE_BOUNDS_MM = (1.0, 120.0)
 
-# Positioning criteria beyond the delta. Bands are {good, acceptable}: a [low, high] range for "range" criteria,
-# otherwise a single limit whose direction the criterion defines (lower-is-better or higher-is-better). The angle
-# and nipple-profile limits follow EUREF / PGMI guidance; the millimetre ones follow the same 10 mm convention.
-# The focus (variance of Laplacian) and exposure (saturated tissue fraction) bands were calibrated on one
-# screening cohort (25th / 5th percentiles) and should be re-measured for a different vendor mix. Compression
-# pressure is graded but ESTIMATED (see criteria.py) and never counts towards the score.
+# Positioning criteria beyond the delta. Bands are {good, acceptable}, a single limit whose direction the criterion
+# defines. Only one criterion is graded; the pectoral angle, nipple centring and gantry angle are shown ungraded.
 DEFAULT_CRITERIA: Dict[str, Dict[str, Any]] = {
-    "pectoral_angle_deg": {"good": [20, 35], "acceptable": [15, 45]},
     "pectoral_below_nipple_mm": {"good": 0, "acceptable": -10},  # negative = pectoral ends above the nipple
-    "nipple_profile_mm": {"good": 5, "acceptable": 10},
-    "nipple_centred_mm": {"good": 10, "acceptable": 20},
-    "symmetry_mm": {"good": 10, "acceptable": 20},
-    "clipped_fraction": {"good": 0.005, "acceptable": 0.02},
-    "sharpness": {"good": 820, "acceptable": 330},
-    "compression_kpa": {"good": [8, 15], "acceptable": [5, 20]},
 }
+
+# Bands of criteria that are no longer graded (2026-11-20). A config written for the old set may still name them;
+# they are ignored rather than refused.
+RETIRED_CRITERIA = frozenset({"pectoral_angle_deg", "nipple_profile_mm", "nipple_centred_mm", "symmetry_mm",
+                              "clipped_fraction", "sharpness", "compression_kpa"})
 
 
 def default_criteria() -> Dict[str, Dict[str, Any]]:

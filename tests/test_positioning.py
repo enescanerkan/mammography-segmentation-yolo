@@ -7,6 +7,7 @@ import numpy as np
 import pytest
 
 from breast_seg.positioning import (
+    CRITERIA_VERSION,
     CriteriaGrader,
     LabelError,
     PositioningAssessor,
@@ -22,6 +23,7 @@ from breast_seg.positioning import (
     pair_verdict,
     summarise,
 )
+from breast_seg.positioning.criteria import mlo_alone, nipple_position
 
 
 def _square(x1, y1, x2, y2):
@@ -120,48 +122,89 @@ def test_summarise_study():
 
 # ── criteria ───────────────────────────────────────────────────────────────
 def test_grading_primitives():
-    grader = CriteriaGrader({"a": {"good": 5, "acceptable": 10}, "h": {"good": 10, "acceptable": 5},
-                             "r": {"good": [1, 2], "acceptable": [0, 3]}})
-    assert [grader.lower_is_better(v, "a") for v in (5, 7, 11)] == ["good", "acceptable", "poor"]
+    grader = CriteriaGrader({"h": {"good": 10, "acceptable": 5}})
     assert [grader.higher_is_better(v, "h") for v in (11, 7, 3)] == ["good", "acceptable", "poor"]
-    assert [grader.in_range(v, "r") for v in (1.5, 2.5, 4)] == ["good", "acceptable", "poor"]
-    assert grader.lower_is_better(1, "missing") == "na"
+    assert grader.higher_is_better(1, "missing") == "na"
 
 
 def test_criteria_for_mlo_and_cc():
     grader = CriteriaGrader()
     mlo = _measured(_image("MLO"))
-    ids = [item["id"] for item in grader.for_image(mlo, mlo["masks"])]
-    assert ids[:3] == ["pectoral_angle", "pectoral_depth", "imf"] and "nipple_profile" in ids and "sharpness" in ids
+    items = grader.for_image(mlo, mlo["masks"])
+    assert [item["id"] for item in items] == ["pectoral_angle", "pectoral_depth", "mlo_alone"]
+    assert items[0]["grade"] == "info" and items[1]["grade"] in ("good", "acceptable", "poor")
+    assert items[2]["grade"] == "na" and "geometry" in items[2]["detail"]   # no frame transform in this fixture
     cc = _measured(_image("CC"))
-    ids = [item["id"] for item in grader.for_image(cc, cc["masks"])]
-    assert "nipple_centred" in ids and "cc_pectoral" in ids
+    items = grader.for_image(cc, cc["masks"])
+    assert [item["id"] for item in items] == ["nipple_centred"] and items[0]["grade"] == "info"
+    assert items[0]["unit"] == "mm" and items[0]["value"] >= 0
 
 
-def test_compression_pressure_is_estimated_and_unscored():
+def test_nipple_centred_is_the_offset_from_the_middle_of_the_breast_height():
+    breast = np.zeros((640, 640), np.uint8)
+    breast[100:501, 0:300] = 1                      # rows 100..500: middle at row 300, half-height 200 px
+    item = CriteriaGrader._nipple_centred(breast, [250.0, 350.0], 0.5, "L-CC")
+    assert item["grade"] == "info" and item["value"] == 25.0 and "25% of the half-height" in item["detail"]
+    assert CriteriaGrader._nipple_centred(None, [1.0, 1.0], 0.5, "L-CC")["grade"] == "na"
+
+
+def _mlo_alone(line, nipple=(300.0, 300.0), size=(640, 640)):
+    transform = {"original_width": size[0], "original_height": size[1], "crop_x1": 0, "crop_y1": 0,
+                 "crop_x2": size[0], "crop_y2": size[1], "scale": 1.0, "pad_left": 0, "pad_top": 0,
+                 "pad_right": 0, "pad_bottom": 0, "pixel_spacing": 0.1}
+    image = {"view": "MLO", "measures": {"mask": {"line": line}}, "transform": transform}
+    return mlo_alone(image, list(nipple), "L-MLO")
+
+
+def test_mlo_alone_foot_inside_or_outside_the_image():
+    inside = _mlo_alone([[100.0, 0.0], [0.0, 100.0]])                   # foot (50, 50)
+    assert (inside["grade"], inside["value"]) == ("info", "adequate") and "inside the image" in inside["detail"]
+    outside = _mlo_alone([[100.0, 0.0], [0.0, 100.0]], nipple=(600.0, 20.0))  # foot (340, -240): 24 mm above the top
+    assert (outside["grade"], outside["value"]) == ("info", "inadequate")
+    assert outside["detail"].endswith("outside the image, 24.0 mm beyond the edge")
+
+
+def test_mlo_alone_margin_is_a_quarter_percent_of_the_longest_side():
+    # 0.25% of 640 px = 1.6 px: a foot 1 px outside still counts as inside, 2 px outside does not
+    assert _mlo_alone([[0.0, -1.0], [640.0, -1.0]])["value"] == "adequate"
+    assert _mlo_alone([[0.0, -2.0], [640.0, -2.0]])["value"] == "inadequate"
+    assert _mlo_alone([[641.5, 0.0], [641.5, 640.0]])["value"] == "adequate"
+    assert _mlo_alone([[641.7, 0.0], [641.7, 640.0]])["value"] == "inadequate"
+
+
+def test_mlo_alone_needs_a_line_a_nipple_and_the_geometry():
+    assert _mlo_alone(None)["grade"] == "na"
+    assert mlo_alone({"view": "MLO", "measures": {"mask": {"line": [[0, 0], [1, 1]]}}}, None, "L-MLO")["grade"] == "na"
+    assert mlo_alone({"view": "MLO", "measures": {"mask": {"line": [[0, 0], [1, 1]]}}}, [5, 5], "L-MLO")["grade"] == "na"
+
+
+def test_a_nipple_mask_under_30_pixels_falls_back_to_the_pose_point():
+    mask = np.zeros((640, 640), np.uint8)
+    mask[100:105, 100:105] = 1                                            # 25 px
+    image = {"landmarks": {"points": {"nipple": [300.0, 320.0]}}}
+    assert nipple_position(image, mask, 30) == [300.0, 320.0]
+    mask[100:106, 100:106] = 1                                            # 36 px
+    assert nipple_position(image, mask, 30) == pytest.approx([102.5, 102.5])
+
+
+def test_header_gantry_is_shown_and_compression_is_not():
     grader = CriteriaGrader()
     image = _measured(_image("CC"))
-    image["physics"] = {"compression_n": 100.0, "thickness_mm": 50.0}
+    image["physics"] = {"compression_n": 100.0, "thickness_mm": 50.0, "gantry_deg": 45.0, "entrance_dose_mgy": 1.2}
     items = grader.for_image(image, image["masks"])
-    pressure = next(item for item in items if item["id"] == "compression_pressure")
-    assert pressure["estimated"] and pressure["unit"] == "kPa"
-    summary = CriteriaGrader.summarise(items)
-    assert summary["graded"] == sum(1 for i in items if not i["estimated"] and i["grade"] != "na")
+    assert [item["id"] for item in items] == ["nipple_centred", "gantry"]
+    assert items[1]["grade"] == "info" and items[1]["value"] == 45.0
 
 
-def test_symmetry_uses_one_route_for_both_sides():
+def test_no_study_level_criteria():
     images = [_measured(_image("MLO", "L")), _measured(_image("MLO", "R"))]
-    items = CriteriaGrader().for_study(images)
-    mlo = next(item for item in items if item["id"] == "symmetry_mlo")
-    assert mlo["grade"] == "good" and mlo["value"] == 0.0
-    cc = next(item for item in items if item["id"] == "symmetry_cc")
-    assert cc["grade"] == "na"
+    assert CriteriaGrader().for_study(images) == []
 
 
-def test_score_ignores_estimates():
-    items = [{"grade": "good"}, {"grade": "poor"}, {"grade": "poor", "estimated": True}, {"grade": "na"}]
-    assert CriteriaGrader.summarise(items) == {
-        "counts": {"good": 1, "acceptable": 0, "poor": 1, "na": 1}, "graded": 2, "worst": "poor", "score": 50.0}
+def test_counts_ignore_estimates_and_information():
+    items = [{"grade": "good"}, {"grade": "poor"}, {"grade": "poor", "estimated": True}, {"grade": "na"},
+             {"grade": "info"}]
+    assert CriteriaGrader.summarise(items) == {"counts": {"good": 1, "acceptable": 0, "poor": 1, "na": 1}, "graded": 2}
 
 
 # ── labels and rules ───────────────────────────────────────────────────────
@@ -234,9 +277,10 @@ def test_assessor_builds_a_complete_record():
     _, record = _record()
     assert record["rules"] == {"threshold_mm": 10.0, "severe_mm": 15.0}
     assert len(record["summary"]["sides"]) == 2
-    assert {"study", "summary"} == set(record["criteria"])
+    assert {"study", "summary", "version"} == set(record["criteria"])
     for image in record["images"]:
-        assert "masks" not in image and set(image["measures"]) == {"landmark", "mask"} and image["criteria"]
+        assert "masks" not in image and set(image["measures"]) == {"landmark", "mask"}
+        assert image["criteria"]
 
 
 def test_moving_the_threshold_redecides():
@@ -280,12 +324,43 @@ def test_report_conclusion_names_the_failing_route():
     assert "Left breast (Segmentation): ΔD 12.3 mm > 10 mm — inadequate." in text
 
 
-def test_poor_criteria_ask_for_a_repeat():
+def _set_criterion(record, view_key, criterion_id, **fields):
+    image = next(image for image in record["images"] if image["view_key"] == view_key)
+    entry = next(entry for entry in image["criteria"] if entry["id"] == criterion_id)
+    entry.update(fields)
+
+
+def test_poor_pectoral_depth_asks_for_a_repeat():
     _, record = _record()
-    record["images"][0]["criteria"].append({"id": "sharpness", "name": "Focus", "grade": "poor", "value": 100.0,
-                                            "unit": "", "estimated": False})
+    _set_criterion(record, "L-MLO", "pectoral_depth", grade="poor", value=-16.6)
     text = build_report(record, "en")["text"]
-    assert f"A repeat {record['images'][0]['view_key']} is advised." in text
+    assert "A repeat L-MLO is advised." in text and "Pectoral reaches nipple level (-16.6mm)" in text
+
+
+def test_information_values_never_ask_for_a_repeat():
+    _, record = _record()
+    for image in record["images"]:
+        for entry in image["criteria"]:
+            if entry["grade"] != "info":
+                entry["grade"] = "good"
+    _set_criterion(record, "L-MLO", "pectoral_angle", value=70.0)   # far outside any guidance band, still info
+    report = build_report(record, "en")
+    text = report["text"]
+    assert "repeat" not in text and "70.0°" in text and "70.0° ·" not in text  # value only, no grade word
+
+
+def test_regrade_rebuilds_criteria_only():
+    assessor, record = _record()
+    record["criteria"]["version"] = 1
+    record["images"][0]["criteria"] = [{"id": "sharpness", "name": "Focus", "grade": "poor", "value": 1.0}]
+    record["images"][0]["measures"]["landmark"]["mm"] = 999.0       # a stored number a re-measure would change
+    summary, rules = copy.deepcopy(record["summary"]), copy.deepcopy(record["rules"])
+    assessor.regrade(record)
+    assert record["criteria"]["version"] == CRITERIA_VERSION
+    assert [entry["id"] for entry in record["images"][0]["criteria"]] == ["pectoral_angle", "pectoral_depth",
+                                                                         "mlo_alone"]
+    assert record["images"][0]["measures"]["landmark"]["mm"] == 999.0
+    assert record["summary"] == summary and record["rules"] == rules
 
 
 def test_masks_are_uint8_binary():

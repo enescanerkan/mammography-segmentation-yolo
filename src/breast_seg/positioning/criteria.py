@@ -1,13 +1,15 @@
 """Positioning criteria beyond delta-D.
 
-Delta-D answers one question — is the posterior tissue on the CC consistent with the MLO. A radiographer judging
-a film asks several more, and most of them are already implied by the masks the segmentation model produced, so
-they cost nothing extra: the pectoral's angle and how far down it reaches, whether the inframammary fold is open,
-whether the nipple is in profile, whether the CC is centred. Two more come straight from the pixels: focus and
-exposure.
+Delta-D answers one question — is the posterior tissue on the CC consistent with the MLO. Next to it the app grades
+one more thing a reader checks on the MLO, whether the pectoral muscle reaches the nipple level, and shows four
+values as information only, with no grade: the pectoral angle (MLO), the MLO-alone verdict (MLO), how far the nipple
+sits from the centre of the breast on the CC, and the gantry angle the header reports.
 
-Every threshold is configuration (:data:`~breast_seg.positioning.config.DEFAULT_CRITERIA`). They are guidance
-values, not a standard — the numbers a service audits against are its own.
+Removed on 2026-11-20 because the radiologists do not grade them and their bands were never checked against a
+reader: compression force / thickness / pressure, dose, focus, exposure, nipple in profile, pectoral visible on CC,
+inframammary fold, left/right symmetry, and the 0-100 criterion score.
+
+The one remaining threshold is configuration (:data:`~breast_seg.positioning.config.DEFAULT_CRITERIA`).
 """
 from __future__ import annotations
 
@@ -22,8 +24,15 @@ GOOD = "good"
 ACCEPTABLE = "acceptable"
 POOR = "poor"
 NA = "na"
+INFO = "info"  # a value shown for information: never graded, never counted
 
-RANK = {GOOD: 0, ACCEPTABLE: 1, POOR: 2, NA: -1}
+# MLO-alone verdict, the criterion of the MLO-only RAUNet paper (its evaluation.py): the foot of the perpendicular
+# from the nipple to the infinite pectoral line must fall inside the image, with a margin of 0.25% of the longest side.
+MLO_ALONE_MARGIN = 0.0025
+MIN_NIPPLE_PX = 30  # a smaller nipple mask counts as missing (the pose nipple is used instead)
+
+# Bumped whenever the set of criteria changes, so stored studies are regraded when they are opened again.
+CRITERIA_VERSION = 3
 
 
 def item(item_id: str, name: str, grade: str, value: Any = None, unit: str = "",
@@ -47,16 +56,6 @@ class CriteriaGrader:
     def _band(self, key: str) -> Dict[str, Any]:
         return self.bands.get(key) or {}
 
-    def lower_is_better(self, value: float, key: str) -> str:
-        band = self._band(key)
-        if not band:
-            return NA
-        if value <= float(band["good"]):
-            return GOOD
-        if value <= float(band["acceptable"]):
-            return ACCEPTABLE
-        return POOR
-
     def higher_is_better(self, value: float, key: str) -> str:
         band = self._band(key)
         if not band:
@@ -64,18 +63,6 @@ class CriteriaGrader:
         if value >= float(band["good"]):
             return GOOD
         if value >= float(band["acceptable"]):
-            return ACCEPTABLE
-        return POOR
-
-    def in_range(self, value: float, key: str) -> str:
-        band = self._band(key)
-        if not band:
-            return NA
-        good_low, good_high = band["good"]
-        ok_low, ok_high = band["acceptable"]
-        if good_low <= value <= good_high:
-            return GOOD
-        if ok_low <= value <= ok_high:
             return ACCEPTABLE
         return POOR
 
@@ -88,75 +75,28 @@ class CriteriaGrader:
 
         breast = masks.get("breast-tissue")
         nipple = masks.get("nipple")
-        pectoral = masks.get("pectoral")
         nipple_point = nipple_position(image, nipple)
 
         if image["view"] == "MLO":
-            items += self._mlo_items(image, breast, pectoral, nipple_point, mm, view_key)
+            items += self._mlo_items(image, nipple_point, mm, view_key)
+            items.append(mlo_alone(image, nipple_position(image, nipple, MIN_NIPPLE_PX), view_key))
         else:
-            items += self._cc_items(breast, pectoral, nipple_point, mm, view_key)
-
-        items.append(self._nipple_profile(breast, nipple_point, image["chest_side"], mm, view_key))
-        items += self._quality_items(image.get("quality") or {}, view_key)
-        items += self._physics_items(image.get("physics") or {}, breast, mm, view_key)
+            items.append(self._nipple_centred(breast, nipple_point, mm, view_key))
+        gantry = (image.get("physics") or {}).get("gantry_deg")
+        if gantry is not None:
+            items.append(item("gantry", "Gantry angle", INFO, round(gantry, 1), "°", "from the DICOM header", view_key))
         return [entry for entry in items if entry is not None]
 
-    def _physics_items(self, physics: Mapping[str, Any], breast: Optional[np.ndarray], mm: float,
-                       view_key: str) -> List[Dict[str, Any]]:
-        """Compression pressure, and the header numbers it is built from.
-
-        Pressure rather than force, because force alone is misleading: the same 80 N is firm on a small breast and
-        slack on a large one. Pressure needs a contact area, and the segmentation already measures one.
-
-        Marked ESTIMATED, and deliberately kept out of the score. The area divided by is the *segmented breast
-        tissue*, not the paddle's true contact area — the two differ by an amount nobody has calibrated here. The
-        number is useful for ranking and for spotting an obviously slack compression; it is not a device
-        measurement.
-        """
-        force = physics.get("compression_n")
-        if not force:
-            return []
-
-        items = [item("compression_force", "Compression force", NA, round(force, 1), "N",
-                      "from the DICOM header", view_key)]
-
-        thickness = physics.get("thickness_mm")
-        if thickness:
-            items.append(item("thickness", "Compressed thickness", NA, round(thickness, 0), "mm",
-                              "from the DICOM header", view_key))
-
-        if breast is not None and breast.any():
-            area_mm2 = float(breast.sum()) * (mm ** 2)
-            if area_mm2 > 0:
-                kpa = force / (area_mm2 * 1e-6) / 1000.0
-                items.append(item(
-                    "compression_pressure", "Compression pressure",
-                    self.in_range(kpa, "compression_kpa"), round(kpa, 1), "kPa",
-                    f"estimated: force ÷ segmented tissue area ({area_mm2 / 100.0:.0f} cm²), not the paddle's "
-                    "true contact area",
-                    view_key, estimated=True))
-
-        gantry = physics.get("gantry_deg")
-        if gantry:
-            items.append(item("gantry", "Gantry angle", NA, round(gantry, 1), "°",
-                              "the angle the pectoral is expected to follow", view_key))
-
-        dose = physics.get("entrance_dose_mgy")
-        if dose:
-            items.append(item("dose", "Entrance dose", NA, round(dose, 2), "mGy",
-                              "from the DICOM header", view_key))
-        return items
-
-    def _mlo_items(self, image: Mapping[str, Any], breast: Optional[np.ndarray], pectoral: Optional[np.ndarray],
-                   nipple_point: Optional[List[float]], mm: float, view_key: str) -> List[Dict[str, Any]]:
+    def _mlo_items(self, image: Mapping[str, Any], nipple_point: Optional[List[float]], mm: float,
+                   view_key: str) -> List[Dict[str, Any]]:
         items = []
         line = ((image.get("measures") or {}).get("mask") or {}).get("line")
 
         if line:
             (ax, ay), (bx, by) = line
             angle = math.degrees(math.atan2(abs(bx - ax), max(abs(by - ay), 1e-6)))
-            items.append(item("pectoral_angle", "Pectoral angle", self.in_range(angle, "pectoral_angle_deg"),
-                              round(angle, 1), "°", "20–35° expected", view_key))
+            items.append(item("pectoral_angle", "Pectoral angle", INFO, round(angle, 1), "°",
+                              "angle of the fitted pectoral line from the vertical", view_key))
             bottom_y = max(ay, by)
         else:
             items.append(item("pectoral_angle", "Pectoral angle", NA, None, "°", "no pectoral line", view_key))
@@ -172,115 +112,87 @@ class CriteriaGrader:
         else:
             items.append(item("pectoral_depth", "Pectoral reaches nipple level", NA, None, "mm",
                               "needs the pectoral and the nipple", view_key))
-
-        if breast is not None and pectoral is not None:
-            rows = np.where(pectoral.any(axis=1))[0]
-            if rows.size:
-                below = breast[int(rows.max()):, :]
-                open_fold = bool(below.sum() > 200)
-                height_mm = round(float(below.sum()) / max(breast.shape[1], 1) * mm, 1)
-                items.append(item("imf", "Inframammary fold open", GOOD if open_fold else POOR,
-                                  height_mm if open_fold else 0.0, "mm",
-                                  "breast tissue visible below the pectoral", view_key))
-        return items
-
-    def _cc_items(self, breast: Optional[np.ndarray], pectoral: Optional[np.ndarray],
-                  nipple_point: Optional[List[float]], mm: float, view_key: str) -> List[Dict[str, Any]]:
-        items = []
-        if breast is not None and nipple_point is not None:
-            rows = np.where(breast.any(axis=1))[0]
-            if rows.size:
-                centre = (float(rows.min()) + float(rows.max())) / 2.0
-                offset = abs(nipple_point[1] - centre) * mm
-                items.append(item("nipple_centred", "Nipple centred",
-                                  self.lower_is_better(offset, "nipple_centred_mm"),
-                                  round(offset, 1), "mm", "vertical distance from the breast's mid-line", view_key))
-        items.append(item("cc_pectoral", "Pectoral visible on CC", GOOD if pectoral is not None else NA,
-                          None, "", "a bonus criterion, not a requirement", view_key))
-        return items
-
-    def _nipple_profile(self, breast: Optional[np.ndarray], nipple_point: Optional[List[float]], chest_side: str,
-                        mm: float, view_key: str) -> Dict[str, Any]:
-        """How far the nipple sits from the breast's anterior edge in its own row band."""
-        if breast is None or nipple_point is None:
-            return item("nipple_profile", "Nipple in profile", NA, None, "mm",
-                        "needs the nipple and the breast contour", view_key)
-
-        x, y = nipple_point
-        row = int(round(y))
-        band = breast[max(0, row - 8):min(breast.shape[0], row + 9), :]
-        columns = np.where(band.any(axis=0))[0]
-        if not columns.size:
-            return item("nipple_profile", "Nipple in profile", NA, None, "mm",
-                        "no tissue at the nipple's level", view_key)
-
-        anterior = float(columns.max()) if chest_side == "L" else float(columns.min())
-        deviation = abs(anterior - x) * mm
-        return item("nipple_profile", "Nipple in profile", self.lower_is_better(deviation, "nipple_profile_mm"),
-                    round(deviation, 1), "mm", "distance from the anterior edge of the breast", view_key)
-
-    def _quality_items(self, quality: Mapping[str, Any], view_key: str) -> List[Dict[str, Any]]:
-        if not quality:
-            return []
-        sharpness = float(quality.get("sharpness") or 0.0)
-        clipped = float(quality.get("clipped_fraction") or 0.0)
-        return [
-            item("sharpness", "Focus", self.higher_is_better(sharpness, "sharpness"),
-                 round(sharpness, 1), "", "variance of Laplacian over the tissue", view_key),
-            item("exposure", "Exposure", self.lower_is_better(clipped, "clipped_fraction"),
-                 round(clipped * 100, 2), "%", "share of saturated tissue pixels", view_key),
-        ]
-
-    # ── across the study ─────────────────────────────────────────────────
-    def for_study(self, images: List[Mapping[str, Any]]) -> List[Dict[str, Any]]:
-        """Left-versus-right comparisons, which no single image can answer."""
-        by_key = {image["view_key"]: image for image in images}
-        items = []
-        for view, name in (("MLO", "PNL symmetry"), ("CC", "Chest-wall distance symmetry")):
-            left = by_key.get(f"L-{view}")
-            right = by_key.get(f"R-{view}")
-            # A failed route still leaves a {"ok": False} dict behind, so the fallback has to test "ok" rather than
-            # presence. Both sides come from the same route — comparing a mask millimetre with a landmark one would
-            # measure the methods.
-            measures = None
-            for route in ("mask", "landmark"):
-                pair = [((image or {}).get("measures") or {}).get(route) or {} for image in (left, right)]
-                if all(m.get("ok") for m in pair):
-                    measures = pair
-                    break
-            if measures is None:
-                items.append(item(f"symmetry_{view.lower()}", name, NA, None, "mm", "needs both sides measured", ""))
-                continue
-            gap = abs(measures[0]["mm"] - measures[1]["mm"])
-            items.append(item(f"symmetry_{view.lower()}", name, self.lower_is_better(gap, "symmetry_mm"),
-                              round(gap, 1), "mm", f"left versus right on {view}", ""))
         return items
 
     @staticmethod
-    def summarise(items: List[Mapping[str, Any]]) -> Dict[str, Any]:
-        """Counts, worst grade and a 0-100 score. The score counts only measurements, never estimates.
+    def _nipple_centred(breast: Optional[np.ndarray], nipple_point: Optional[List[float]], mm: float,
+                        view_key: str) -> Dict[str, Any]:
+        """CC: vertical distance of the nipple from the middle of the breast's vertical extent (information only).
 
-        An estimated value can still be graded and shown — it is worth seeing — but it must not move a number
-        somebody will quote, because its uncertainty has not been characterised.
+        The extent is the first to the last image row holding breast-tissue mask; on a CC that is the breast's
+        height at the chest wall, where it is widest. The nipple is the nipple-mask centroid, else the pose point.
         """
+        if breast is None or nipple_point is None:
+            return item("nipple_centred", "Nipple centred", NA, None, "mm", "needs the nipple and the breast", view_key)
+        rows = np.where(breast.any(axis=1))[0]
+        if not rows.size:
+            return item("nipple_centred", "Nipple centred", NA, None, "mm", "no breast tissue", view_key)
+        top, bottom = float(rows.min()), float(rows.max())
+        offset_px = abs(nipple_point[1] - (top + bottom) / 2.0)
+        share = 100.0 * offset_px / max((bottom - top) / 2.0, 1.0)
+        return item("nipple_centred", "Nipple centred", INFO, round(offset_px * mm, 1), "mm",
+                    f"distance from the middle of the breast's height ({share:.0f}% of the half-height)", view_key)
+
+    # ── across the study ─────────────────────────────────────────────────
+    def for_study(self, images: List[Mapping[str, Any]]) -> List[Dict[str, Any]]:
+        """Study-level criteria. None since the left/right symmetry checks were removed; kept as the hook."""
+        return []
+
+    @staticmethod
+    def summarise(items: List[Mapping[str, Any]]) -> Dict[str, Any]:
+        """How many graded items are good / acceptable / poor (information items and estimates are not counted)."""
         counts = {GOOD: 0, ACCEPTABLE: 0, POOR: 0, NA: 0}
         for entry in items:
-            if entry.get("estimated"):
+            if entry.get("estimated") or entry["grade"] not in counts:
                 continue
-            counts[entry["grade"]] = counts.get(entry["grade"], 0) + 1
-        graded = counts[GOOD] + counts[ACCEPTABLE] + counts[POOR]
-        worst = POOR if counts[POOR] else (ACCEPTABLE if counts[ACCEPTABLE] else GOOD)
-        return {
-            "counts": counts,
-            "graded": graded,
-            "worst": worst if graded else NA,
-            "score": round(100.0 * (counts[GOOD] + 0.5 * counts[ACCEPTABLE]) / graded, 0) if graded else None,
-        }
+            counts[entry["grade"]] += 1
+        return {"counts": counts, "graded": counts[GOOD] + counts[ACCEPTABLE] + counts[POOR]}
 
 
-def nipple_position(image: Mapping[str, Any], nipple_mask: Optional[np.ndarray]) -> Optional[List[float]]:
+def mlo_alone(image: Mapping[str, Any], nipple_point: Optional[List[float]], view_key: str) -> Dict[str, Any]:
+    """MLO-alone verdict (information only): does the posterior nipple line meet the pectoral line inside the image?
+
+    The nipple is dropped perpendicularly onto the fitted pectoral line, taken as an infinite line; the foot of that
+    perpendicular is mapped back to the original pixel grid and must lie within the image, widened on every side by
+    0.25% of its longest side. Inside means adequate, outside inadequate. It never changes the ΔD verdict.
+    """
+    name = "MLO alone"
+    line = ((image.get("measures") or {}).get("mask") or {}).get("line")
+    if not line or nipple_point is None:
+        return item("mlo_alone", name, NA, None, "", "needs the pectoral line and the nipple", view_key)
+    geometry = image.get("transform") or {}
+    try:
+        scale = float(geometry["scale"])
+        width, height = float(geometry["original_width"]), float(geometry["original_height"])
+        shift = np.array([geometry["pad_left"], geometry["pad_top"]], float)
+        origin = np.array([geometry["crop_x1"], geometry["crop_y1"]], float)
+    except (KeyError, TypeError, ValueError):
+        return item("mlo_alone", name, NA, None, "", "no image geometry stored for this study", view_key)
+
+    def original(point):
+        return (np.asarray(point, float) - shift) / scale + origin
+
+    a, b, nipple = original(line[0]), original(line[1]), original(nipple_point)
+    direction = b - a
+    if not direction.any():
+        return item("mlo_alone", name, NA, None, "", "needs the pectoral line and the nipple", view_key)
+    foot = a + float((nipple - a) @ direction / (direction @ direction)) * direction
+    margin = MLO_ALONE_MARGIN * max(width, height)
+    inside = -margin <= foot[0] < width + margin and -margin <= foot[1] < height + margin
+    if inside:
+        return item("mlo_alone", name, INFO, "adequate", "",
+                    "the posterior nipple line meets the pectoral line inside the image", view_key)
+    beyond_px = float(np.hypot(max(0.0, -foot[0], foot[0] - width), max(0.0, -foot[1], foot[1] - height)))
+    spacing = float(geometry.get("pixel_spacing") or 0.0)
+    beyond = f", {beyond_px * spacing:.1f} mm beyond the edge" if spacing > 0 else ""
+    return item("mlo_alone", name, INFO, "inadequate", "",
+                f"the posterior nipple line meets the pectoral line outside the image{beyond}", view_key)
+
+
+def nipple_position(image: Mapping[str, Any], nipple_mask: Optional[np.ndarray],
+                    min_pixels: int = 1) -> Optional[List[float]]:
     """The nipple, preferring the segmentation centroid and falling back to the pose point."""
-    if nipple_mask is not None and nipple_mask.any():
+    if nipple_mask is not None and int(np.count_nonzero(nipple_mask)) >= min_pixels:
         ys, xs = np.nonzero(nipple_mask)
         return [float(xs.mean()), float(ys.mean())]
     point = ((image.get("landmarks") or {}).get("points") or {}).get("nipple")

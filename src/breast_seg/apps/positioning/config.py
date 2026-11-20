@@ -19,6 +19,7 @@ from ...positioning.config import (
     SEVERE_BOUNDS_MM,
     THRESHOLD_BOUNDS_MM,
     Rules,
+    RETIRED_CRITERIA,
     default_criteria,
 )
 from ...positioning.report import LANGUAGES
@@ -171,7 +172,8 @@ def app_config_from_dict(data: Optional[Dict[str, Any]], base_dir: Optional[Unio
     data = dict(data or {})
     criteria = default_criteria()
     for key, band in (data.pop("criteria", None) or {}).items():
-        criteria[key] = dict(band)
+        if key not in RETIRED_CRITERIA:
+            criteria[key] = dict(band)
     hints = get_type_hints(AppConfig)
     allowed = {f.name for f in dataclasses.fields(AppConfig)} - {"base_dir", "criteria"}
     sections: Dict[str, Any] = {}

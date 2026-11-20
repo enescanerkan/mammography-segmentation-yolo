@@ -29,7 +29,7 @@ def test_committed_registry_parses(monkeypatch, tmp_path):
     assert registry.select("landmark", "MLO").id == "pose_mlo"
     assert registry.select("landmark", "CC").id == "pose_cc"
     assert registry.select("segmentation").id == "seg_v4"  # seg_v5 is declared but disabled
-    assert registry.select("detection").id == "lesion_det"
+    assert registry.select("detection") is None  # lesion_det disabled: no mass / calcification boxes
     assert registry.select("prompt_segmentation") is None  # medsam2 disabled
     seg = registry.get("seg_v4")
     assert seg.classes == ("pectoral", "breast-tissue", "nipple") and seg.nipple_rescue.enabled

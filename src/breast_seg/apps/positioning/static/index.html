@@ -33,7 +33,6 @@
       <li id="sp-server" data-i18n="sp_server">Connecting to the server</li>
       <li id="sp-pose" data-i18n="sp_pose">Landmark models (MLO, CC)</li>
       <li id="sp-seg" data-i18n="sp_seg">Segmentation model</li>
-      <li id="sp-lesion" data-i18n="sp_lesion">Lesion detector (optional)</li>
     </ul>
   </div>
 </div>
@@ -141,7 +140,7 @@
       </div>
 
       <button type="button" class="btn btn-sm btn-ghost-clinical" id="criteria-toggle" aria-expanded="false">
-        <span data-i18n="criteria_btn">Criteria</span> <span class="score-chip" id="score-chip">—</span>
+        <span data-i18n="criteria_btn">Criteria</span>
       </button>
       <button type="button" class="btn btn-sm btn-ghost-clinical" id="report-toggle" aria-expanded="false" data-i18n="report_btn">Report</button>
       <button type="button" class="btn btn-sm btn-accent" id="open-editor" data-i18n="edit_labels">Edit labels</button>
@@ -166,6 +165,19 @@
     </div>
   </div>
 </header>
+
+<!-- Dataset mode: one study of a folder at a time. Shown on every screen while a dataset is open. -->
+<div class="dataset-bar d-print-none" id="dataset-nav" hidden>
+  <span class="dataset-key" data-i18n="ds_title">Dataset</span>
+  <span class="dataset-name" id="dataset-name"></span>
+  <button type="button" class="btn btn-sm dataset-btn" id="dataset-prev" data-i18n-title="ds_prev_title">‹ <span data-i18n="ds_prev_btn">Previous</span></button>
+  <select id="dataset-pick" data-i18n-aria="ds_pick"></select>
+  <button type="button" class="btn btn-sm dataset-btn" id="dataset-next" data-i18n-title="ds_next_title"><span id="dataset-next-label">Next</span> <span id="dataset-next-mark">›</span></button>
+  <span class="dataset-state" id="dataset-state"></span>
+  <span class="dataset-skipped" id="dataset-skipped"></span>
+  <span class="dataset-keys" data-i18n="ds_keys">PageDown next · PageUp previous</span>
+  <button type="button" class="step dataset-close" id="dataset-close" data-i18n-title="ds_close" data-i18n-aria="ds_close">✕</button>
+</div>
 
 <div class="banner" id="banner" hidden role="alert">
   <span id="banner-text"></span>
@@ -195,6 +207,8 @@
                 <div class="drop-actions">
                   <button type="button" class="btn btn-primary" id="choose-files" data-i18n="choose_files">Choose files</button>
                   <button type="button" class="btn btn-outline-primary" id="choose-folder" data-i18n="choose_folder">Choose a folder</button>
+                  <button type="button" class="btn btn-outline-primary" id="choose-dataset" data-i18n="choose_dataset"
+                          data-i18n-title="dataset_hint">Open a dataset</button>
                 </div>
                 <div class="drop-views">
                   <span>R-MLO</span><span>L-MLO</span><span>R-CC</span><span>L-CC</span>
@@ -229,6 +243,7 @@
             </div>
             <input type="file" id="file-input" accept=".dcm,.dicom,application/dicom" multiple hidden>
             <input type="file" id="folder-input" webkitdirectory directory multiple hidden>
+            <input type="file" id="dataset-input" webkitdirectory directory multiple hidden>
           </div>
         </div>
 
@@ -394,15 +409,11 @@
         <dl class="keys">
           <dt>V</dt><dd data-i18n="k_select">Select</dd>
           <dt>P</dt><dd data-i18n="k_polygon">Polygon</dd>
-          <dt>B</dt><dd data-i18n="k_box">Box</dd>
           <dt>N</dt><dd data-i18n="k_point">Point</dd>
           <dt>Enter</dt><dd data-i18n="k_finish">Finish polygon</dd>
           <dt>Esc</dt><dd data-i18n="k_cancel">Cancel drawing</dd>
-          <dt data-i18n="key_alt_click">Alt+click</dt><dd data-i18n="k_delete_vertex">Delete a vertex or box</dd>
+          <dt data-i18n="key_alt_click">Alt+click</dt><dd data-i18n="k_delete_vertex">Delete a vertex</dd>
           <dt data-i18n="key_shift_click">Shift+click</dt><dd data-i18n="k_insert">Insert a vertex</dd>
-          <dt>Ctrl+C / V</dt><dd data-i18n="k_copy">Copy / paste a box</dd>
-          <dt>Ctrl+D</dt><dd data-i18n="k_dup">Duplicate a box</dd>
-          <dt>Delete</dt><dd data-i18n="k_remove">Remove the selected box</dd>
           <dt>Ctrl+Z</dt><dd data-i18n="k_undo">Undo</dd>
           <dt data-i18n="key_dblclick">Double-click</dt><dd data-i18n="k_fit">Fit to view</dd>
           <dt data-i18n="key_scroll">Scroll</dt><dd data-i18n="k_zoom">Zoom</dd>

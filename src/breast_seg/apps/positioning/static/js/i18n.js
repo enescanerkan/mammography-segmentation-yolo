@@ -20,8 +20,7 @@ const EN = {
   dismiss: 'Dismiss', close: 'Close', cancel: 'Cancel', cancelled: 'Cancelled.',
 
   splash_sub: 'Preparing the review workstation…',
-  sp_server: 'Connecting to the server', sp_pose: 'Landmark models (MLO, CC)', sp_seg: 'Segmentation model',
-  sp_lesion: 'Lesion detector (optional)', sp_retry: 'Server not reachable — retrying…',
+  sp_server: 'Connecting to the server', sp_pose: 'Landmark models (MLO, CC)', sp_seg: 'Segmentation model', sp_retry: 'Server not reachable — retrying…',
 
   pretitle: 'Positioning quality',
   headline: 'Two independent methods, one verdict per breast.',
@@ -37,12 +36,25 @@ const EN = {
   drop_main: 'Drop DICOM files or a study folder', drop_sub: 'or click to choose files',
   drop_aria: 'Drop DICOM files here, or click to choose files',
   choose_files: 'Choose files', choose_folder: 'Choose a folder',
+  choose_dataset: 'Open a dataset', dataset_hint: 'A folder of many studies, reviewed one study after another.',
+  ds_title: 'Dataset', ds_prev_btn: 'Previous', ds_next_btn: 'Next', ds_finish_btn: 'Finish',
+  ds_prev_title: 'Previous study (PageUp)', ds_next_title: 'Next study (PageDown)', ds_keys: 'PageDown next · PageUp previous',
+  ds_finish: 'Finish the dataset', ds_close: 'Leave the dataset', ds_pick: 'Go to study',
+  ds_option: '{i} / {n} · {name}', ds_scanning: 'Reading the study headers… {d} / {n} files',
+  ds_analysing: 'Study {i} / {n} — analysing…', ds_working: 'opening study {i}…', ds_last: 'last study',
+  ds_done: 'finished · {o} / {n} opened', ds_state_failed: 'could not be analysed', ds_state_removed: 'removed',
+  ds_skipped: '{n} files skipped (not DICOM)',
+  ds_empty: 'No DICOM study was found in this folder.',
+  ds_failed: 'Study {i} ({name}) could not be analysed: {msg}',
+  ds_finished_all: 'Dataset finished: all {n} studies were opened.',
+  ds_finished_counts: 'Dataset finished: {o} of {n} studies opened, {f} failed, {u} not opened.',
+  busy_wait: 'Still working on the previous step — try again in a moment.',
   tree_summary: 'Accepted folder layout',
   tree_note: 'The folder name carries the view, so the files inside can be named anything. Loose DICOM files work as well.',
   how_title: 'How it works',
   step1: 'Upload', step1_d: 'MLO and CC of both breasts; view and side are read from the DICOM header, or from the folder name.',
-  step2: 'Review', step2_d: 'ΔD per breast from the landmarks and from the segmentation, side by side, with the criteria a radiographer checks.',
-  step3: 'Correct', step3_d: 'Edit any contour, point or box; every measurement and the report follow.',
+  step2: 'Review', step2_d: 'ΔD per breast from the landmarks and from the segmentation, side by side, with the pectoral angle and the MLO criteria.',
+  step3: 'Correct', step3_d: 'Edit any contour or point; every measurement and the report follow.',
   recent: 'Recent studies', refresh: 'refresh', clear: 'clear', no_recent: 'No stored studies yet.',
   st_upload: 'Uploading', st_analyse: 'Reading DICOM, placing landmarks, segmenting', st_render: 'Preparing the views',
   files_n: '{n} files', file_1: '1 file',
@@ -60,11 +72,10 @@ const EN = {
   fill_opacity: 'Fill opacity', line_width: 'Line width', image: 'Image', brightness: 'Brightness', contrast: 'Contrast',
   invert: 'Invert grey scale', reset_window: 'Reset window', reset_appearance: 'Reset appearance',
 
-  c_breast: 'Breast tissue', c_pectoral: 'Pectoral muscle', c_nipple: 'Nipple contour', c_landmarks: 'Landmarks',
-  c_mass: 'Mass', c_calc: 'Calcification', c_measure_landmark: 'Measure · landmark', c_measure_mask: 'Measure · segmentation',
-  layer_points: 'Pose landmarks', layer_lesion: 'Mass / Calcification',
+  c_breast: 'Breast tissue', c_pectoral: 'Pectoral muscle', c_nipple: 'Nipple contour', c_landmarks: 'Landmarks', c_measure_landmark: 'Measure · landmark', c_measure_mask: 'Measure · segmentation',
+  layer_points: 'Pose landmarks',
   pt_nipple: 'nipple', pt_pectoral_top: 'pec ↑', pt_pectoral_bottom: 'pec ↓',
-  lesion_Mass: 'Mass', lesion_Calcification: 'Calcification',
+ 
 
   not_uploaded: 'not uploaded', preview_unavailable: 'preview unavailable', enlarge: 'Enlarge {view}',
   worst_on_view: 'Worst criterion on this view: {grade}',
@@ -75,7 +86,6 @@ const EN = {
   badge_mirrored: 'mirrored', badge_mirrored_title: 'The model only detected anything on the mirrored image',
   badge_rescued: 'nipple rescued',
   badge_rescued_title: 'Segmentation found the nipple at low confidence; the pose model vouched for it',
-  lesions_1: '1 lesion', lesions_n: '{n} lesions',
 
   right_breast: 'Right breast', left_breast: 'Left breast', no_views: 'no views',
   nothing_uploaded: 'Nothing uploaded for this breast.',
@@ -89,8 +99,9 @@ const EN = {
   criteria_title: 'Positioning criteria',
   criteria_counts: '{g} good · {a} acceptable · {p} poor',
   criteria_empty: 'No criteria for this study yet — they are computed from the segmentation masks, so a view without them has no usable contours.',
-  grade_good: 'Good', grade_acceptable: 'Acceptable', grade_poor: 'Poor', grade_na: 'n/a',
-  both_breasts: 'Both breasts', est: 'est', est_title: 'Estimated — shown but excluded from the score',
+  grade_good: 'Good', grade_acceptable: 'Acceptable', grade_poor: 'Poor', grade_na: 'n/a', grade_info: 'information',
+  mlo_alone_label: 'MLO alone', mlo_alone_adequate: 'adequate', mlo_alone_inadequate: 'inadequate',
+  both_breasts: 'Both breasts', est: 'est', est_title: 'Estimated — shown, never graded',
   notes: 'Notes',
   notice_flagged: 'The two methods disagree — this study needs a review.',
   notice_spacing: 'Pixel spacing is missing from the header ({views}) — millimetre values assume 0.085 mm and are estimates.',
@@ -105,21 +116,19 @@ const EN = {
   back: '← Back to review', unsaved: 'Unsaved changes', undo: 'Undo', revert: 'Revert view',
   save: 'Save & recompute', saving: 'Saving…', save_failed: 'Save failed — retry',
   ed_view: 'View', ed_structure: 'Structure', ed_tool: 'Tool', ed_shortcuts: 'Shortcuts',
-  k_select: 'Select', k_polygon: 'Polygon', k_box: 'Box', k_point: 'Point', k_finish: 'Finish polygon',
-  k_cancel: 'Cancel drawing', k_delete_vertex: 'Delete a vertex or box', k_insert: 'Insert a vertex',
-  k_copy: 'Copy / paste a box', k_dup: 'Duplicate a box', k_remove: 'Remove the selected box', k_undo: 'Undo',
+  k_select: 'Select', k_polygon: 'Polygon', k_point: 'Point', k_finish: 'Finish polygon',
+  k_cancel: 'Cancel drawing', k_delete_vertex: 'Delete a vertex', k_insert: 'Insert a vertex',
+  k_undo: 'Undo',
   k_fit: 'Fit to view', k_zoom: 'Zoom', k_pan: 'Pan',
   key_alt_click: 'Alt+click', key_shift_click: 'Shift+click', key_dblclick: 'Double-click', key_scroll: 'Scroll',
   key_middle: 'Middle-drag',
-  hint_select: 'Drag a handle to move it. Shift+click an edge inserts a vertex, Alt+click removes one. Drag inside a box to move it, a corner to resize.',
+  hint_select: 'Drag a handle to move it. Shift+click an edge inserts a vertex, Alt+click removes one.',
   hint_polygon: 'Click to place vertices. Enter, a double-click, or a click on the first point closes the shape and replaces the current one.',
-  hint_box: 'Drag to draw a lesion box. Ctrl+C and Ctrl+V duplicate the selected one; Delete removes it.',
   hint_point: 'Click to place the selected landmark. Alt+click removes it.',
   cls_breast: 'Breast tissue', cls_pectoral: 'Pectoral muscle', cls_nipple: 'Nipple contour',
   cls_nipple_point: 'Nipple point', cls_pec_top: 'Pectoral top', cls_pec_bottom: 'Pectoral bottom',
-  cls_mass: 'Mass', cls_calc: 'Calcification',
   st_pts: '{n} pts', st_none: 'none', st_set: 'set', edited_mark: 'Edited',
-  delete_box: 'Delete this box', delete_named: 'Delete {name}',
+ 
   discard_confirm: 'Discard the unsaved label changes?',
   zoom_in: 'Zoom in', zoom_out: 'Zoom out', fit: 'Fit',
 
@@ -149,8 +158,7 @@ const TR = {
   dismiss: 'Kapat', close: 'Kapat', cancel: 'İptal', cancelled: 'İptal edildi.',
 
   splash_sub: 'Değerlendirme istasyonu hazırlanıyor…',
-  sp_server: 'Sunucuya bağlanılıyor', sp_pose: 'Nokta modelleri (MLO, CC)', sp_seg: 'Segmentasyon modeli',
-  sp_lesion: 'Lezyon dedektörü (isteğe bağlı)', sp_retry: 'Sunucuya ulaşılamıyor — yeniden deneniyor…',
+  sp_server: 'Sunucuya bağlanılıyor', sp_pose: 'Nokta modelleri (MLO, CC)', sp_seg: 'Segmentasyon modeli', sp_retry: 'Sunucuya ulaşılamıyor — yeniden deneniyor…',
 
   pretitle: 'Pozisyonlama kalitesi',
   headline: 'İki bağımsız yöntem, her meme için tek karar.',
@@ -166,12 +174,25 @@ const TR = {
   drop_main: 'DICOM dosyalarını ya da çalışma klasörünü bırakın', drop_sub: 'ya da dosya seçmek için tıklayın',
   drop_aria: 'DICOM dosyalarını buraya bırakın ya da seçmek için tıklayın',
   choose_files: 'Dosya seç', choose_folder: 'Klasör seç',
+  choose_dataset: 'Veri seti aç', dataset_hint: 'Birçok çalışma içeren bir klasör; çalışmalar sırayla tek tek açılır.',
+  ds_title: 'Veri seti', ds_prev_btn: 'Önceki', ds_next_btn: 'Sonraki', ds_finish_btn: 'Bitir',
+  ds_prev_title: 'Önceki çalışma (PageUp)', ds_next_title: 'Sonraki çalışma (PageDown)', ds_keys: 'PageDown sonraki · PageUp önceki',
+  ds_finish: 'Veri setini bitir', ds_close: 'Veri setinden çık', ds_pick: 'Çalışmaya git',
+  ds_option: '{i} / {n} · {name}', ds_scanning: 'Çalışma başlıkları okunuyor… {d} / {n} dosya',
+  ds_analysing: 'Çalışma {i} / {n} — analiz ediliyor…', ds_working: '{i}. çalışma açılıyor…', ds_last: 'son çalışma',
+  ds_done: 'bitti · {o} / {n} açıldı', ds_state_failed: 'analiz edilemedi', ds_state_removed: 'silindi',
+  ds_skipped: '{n} dosya atlandı (DICOM değil)',
+  ds_empty: 'Bu klasörde DICOM çalışması bulunamadı.',
+  ds_failed: 'Çalışma {i} ({name}) analiz edilemedi: {msg}',
+  ds_finished_all: 'Veri seti bitti: {n} çalışmanın hepsi açıldı.',
+  ds_finished_counts: 'Veri seti bitti: {n} çalışmadan {o} açıldı, {f} analiz edilemedi, {u} açılmadı.',
+  busy_wait: 'Önceki işlem sürüyor — biraz sonra yeniden deneyin.',
   tree_summary: 'Kabul edilen klasör düzeni',
   tree_note: 'Görünüm klasör adından okunur; içindeki dosyalar herhangi bir adla olabilir. Tek tek DICOM dosyaları da kabul edilir.',
   how_title: 'Nasıl çalışır',
   step1: 'Yükleyin', step1_d: 'İki memenin MLO ve CC görüntüleri; görünüm ve taraf DICOM başlığından ya da klasör adından okunur.',
-  step2: 'İnceleyin', step2_d: 'Her meme için nokta ve segmentasyon kaynaklı ΔD yan yana, bir teknisyenin kontrol ettiği kriterlerle birlikte.',
-  step3: 'Düzeltin', step3_d: 'Herhangi bir konturu, noktayı ya da kutuyu düzenleyin; tüm ölçümler ve rapor güncellenir.',
+  step2: 'İnceleyin', step2_d: 'Her meme için nokta ve segmentasyon kaynaklı ΔD yan yana; pektoral açı ve MLO kriterleriyle birlikte.',
+  step3: 'Düzeltin', step3_d: 'Herhangi bir konturu ya da noktayı düzenleyin; tüm ölçümler ve rapor güncellenir.',
   recent: 'Son çalışmalar', refresh: 'yenile', clear: 'temizle', no_recent: 'Henüz saklanan çalışma yok.',
   st_upload: 'Yükleniyor', st_analyse: 'DICOM okunuyor, noktalar yerleştiriliyor, segmentasyon yapılıyor',
   st_render: 'Görüntüler hazırlanıyor',
@@ -191,11 +212,10 @@ const TR = {
   contrast: 'Kontrast', invert: 'Gri skalayı ters çevir', reset_window: 'Pencereyi sıfırla',
   reset_appearance: 'Görünümü sıfırla',
 
-  c_breast: 'Meme dokusu', c_pectoral: 'Pektoral kas', c_nipple: 'Meme ucu konturu', c_landmarks: 'Noktalar',
-  c_mass: 'Kitle', c_calc: 'Kalsifikasyon', c_measure_landmark: 'Ölçüm · nokta', c_measure_mask: 'Ölçüm · segmentasyon',
-  layer_points: 'Poz noktaları', layer_lesion: 'Kitle / Kalsifikasyon',
+  c_breast: 'Meme dokusu', c_pectoral: 'Pektoral kas', c_nipple: 'Meme ucu konturu', c_landmarks: 'Noktalar', c_measure_landmark: 'Ölçüm · nokta', c_measure_mask: 'Ölçüm · segmentasyon',
+  layer_points: 'Poz noktaları',
   pt_nipple: 'meme ucu', pt_pectoral_top: 'pek ↑', pt_pectoral_bottom: 'pek ↓',
-  lesion_Mass: 'Kitle', lesion_Calcification: 'Kalsifikasyon',
+ 
 
   not_uploaded: 'yüklenmedi', preview_unavailable: 'önizleme yok', enlarge: '{view} büyüt',
   worst_on_view: 'Bu görüntüdeki en kötü kriter: {grade}',
@@ -206,7 +226,6 @@ const TR = {
   badge_mirrored: 'aynalı', badge_mirrored_title: 'Model yalnız aynalanmış görüntüde bir şey buldu',
   badge_rescued: 'meme ucu kurtarıldı',
   badge_rescued_title: 'Segmentasyon meme ucunu düşük güvenle buldu; nokta modeli konumunu doğruladı',
-  lesions_1: '1 lezyon', lesions_n: '{n} lezyon',
 
   right_breast: 'Sağ meme', left_breast: 'Sol meme', no_views: 'görüntü yok',
   nothing_uploaded: 'Bu meme için görüntü yüklenmedi.',
@@ -220,8 +239,9 @@ const TR = {
   criteria_title: 'Pozisyonlama kriterleri',
   criteria_counts: '{g} iyi · {a} kabul edilebilir · {p} zayıf',
   criteria_empty: 'Bu çalışma için henüz kriter yok — kriterler segmentasyon maskelerinden hesaplanır; maskesi olmayan görüntüde kullanılabilir kontur yoktur.',
-  grade_good: 'İyi', grade_acceptable: 'Kabul edilebilir', grade_poor: 'Zayıf', grade_na: 'yok',
-  both_breasts: 'İki meme', est: 'tah', est_title: 'Tahmini — gösterilir ama skora katılmaz',
+  grade_good: 'İyi', grade_acceptable: 'Kabul edilebilir', grade_poor: 'Zayıf', grade_na: 'yok', grade_info: 'bilgi',
+  mlo_alone_label: 'MLO tek başına', mlo_alone_adequate: 'yeterli', mlo_alone_inadequate: 'yetersiz',
+  both_breasts: 'İki meme', est: 'tah', est_title: 'Tahmini — gösterilir, derecelendirilmez',
   notes: 'Notlar',
   notice_flagged: 'İki yöntem ayrışıyor — bu çalışma gözden geçirilmeli.',
   notice_spacing: 'Başlıkta piksel aralığı yok ({views}) — milimetre değerleri 0,085 mm varsayar ve tahminidir.',
@@ -236,21 +256,19 @@ const TR = {
   back: '← İncelemeye dön', unsaved: 'Kaydedilmemiş değişiklikler', undo: 'Geri al', revert: 'Görüntüyü geri al',
   save: 'Kaydet ve yeniden hesapla', saving: 'Kaydediliyor…', save_failed: 'Kaydedilemedi — yeniden dene',
   ed_view: 'Görüntü', ed_structure: 'Yapı', ed_tool: 'Araç', ed_shortcuts: 'Kısayollar',
-  k_select: 'Seç', k_polygon: 'Çokgen', k_box: 'Kutu', k_point: 'Nokta', k_finish: 'Çokgeni bitir',
-  k_cancel: 'Çizimi iptal et', k_delete_vertex: 'Köşe ya da kutu sil', k_insert: 'Köşe ekle',
-  k_copy: 'Kutu kopyala / yapıştır', k_dup: 'Kutuyu çoğalt', k_remove: 'Seçili kutuyu kaldır', k_undo: 'Geri al',
+  k_select: 'Seç', k_polygon: 'Çokgen', k_point: 'Nokta', k_finish: 'Çokgeni bitir',
+  k_cancel: 'Çizimi iptal et', k_delete_vertex: 'Köşe sil', k_insert: 'Köşe ekle',
+  k_undo: 'Geri al',
   k_fit: 'Sığdır', k_zoom: 'Yakınlaştır', k_pan: 'Kaydır',
   key_alt_click: 'Alt+tık', key_shift_click: 'Shift+tık', key_dblclick: 'Çift tık', key_scroll: 'Tekerlek',
   key_middle: 'Orta tuşla sürükle',
-  hint_select: 'Taşımak için bir tutamacı sürükleyin. Shift+tık kenara köşe ekler, Alt+tık köşeyi siler. Kutuyu taşımak için içinden, boyutlandırmak için köşesinden sürükleyin.',
+  hint_select: 'Taşımak için bir tutamacı sürükleyin. Shift+tık kenara köşe ekler, Alt+tık köşeyi siler.',
   hint_polygon: 'Köşe eklemek için tıklayın. Enter, çift tık ya da ilk noktaya tık şekli kapatır ve mevcut şeklin yerine geçer.',
-  hint_box: 'Lezyon kutusu çizmek için sürükleyin. Ctrl+C ve Ctrl+V seçili kutuyu çoğaltır; Delete siler.',
   hint_point: 'Seçili noktayı yerleştirmek için tıklayın. Alt+tık siler.',
   cls_breast: 'Meme dokusu', cls_pectoral: 'Pektoral kas', cls_nipple: 'Meme ucu konturu',
   cls_nipple_point: 'Meme ucu noktası', cls_pec_top: 'Pektoral üst', cls_pec_bottom: 'Pektoral alt',
-  cls_mass: 'Kitle', cls_calc: 'Kalsifikasyon',
   st_pts: '{n} nokta', st_none: 'yok', st_set: 'var', edited_mark: 'Düzenlendi',
-  delete_box: 'Bu kutuyu sil', delete_named: '{name} sil',
+ 
   discard_confirm: 'Kaydedilmemiş etiket değişiklikleri silinsin mi?',
   zoom_in: 'Yakınlaştır', zoom_out: 'Uzaklaştır', fit: 'Sığdır',
 
@@ -265,22 +283,34 @@ const TR = {
 // Criterion names and descriptions, keyed by the criterion id the server sends. English falls back to the
 // server's own text, so only the translations are listed.
 const CRITERIA_TR = {
-  pectoral_angle: ['Pektoral açı', '20–35° beklenir'],
-  pectoral_depth: ['Pektoral meme ucu seviyesine iniyor', 'pozitif = pektoral meme ucunun altına uzanıyor'],
-  imf: ['İnframammer katlantı açık', 'pektoralin altında görünen meme dokusu'],
-  nipple_profile: ['Meme ucu profilde', 'memenin ön kenarına uzaklık'],
-  nipple_centred: ['Meme ucu ortalanmış', 'memenin orta çizgisine dikey uzaklık'],
-  cc_pectoral: ["CC'de pektoral görünür", 'ek bir kriter, zorunlu değil'],
-  sharpness: ['Odak', 'doku üzerinde Laplace varyansı'],
-  exposure: ['Pozlama', 'doymuş doku piksellerinin payı'],
-  symmetry_mlo: ['PNL simetrisi', 'MLO’da sol–sağ karşılaştırması'],
-  symmetry_cc: ['Göğüs duvarı mesafesi simetrisi', 'CC’de sol–sağ karşılaştırması'],
-  compression_force: ['Sıkıştırma kuvveti', 'DICOM başlığından'],
-  thickness: ['Sıkıştırılmış kalınlık', 'DICOM başlığından'],
-  compression_pressure: ['Sıkıştırma basıncı', 'tahmini: kuvvet ÷ segmente doku alanı; pedalın gerçek temas alanı değil'],
-  gantry: ['C-kol açısı', 'pektoralin izlemesi beklenen açı'],
-  dose: ['Giriş dozu', 'DICOM başlığından'],
+  pectoral_angle: 'Pektoral açı',
+  pectoral_depth: 'Pektoral meme ucu seviyesine iniyor',
+  nipple_centred: 'Meme ucu ortalanmış',
+  mlo_alone: 'MLO tek başına',
+  gantry: 'C-kol açısı',
 };
+
+// The server's detail texts (criteria.py), each a pattern whose numbers carry over into the translation. A detail
+// with no pattern here is shown as the server wrote it.
+const DETAILS_TR = [
+  [/^angle of the fitted pectoral line from the vertical$/, () => 'oturtulan pektoral çizginin dikeyle açısı'],
+  [/^positive = pectoral extends below the nipple$/, () => 'pozitif = pektoral meme ucunun altına uzanıyor'],
+  [/^distance from the middle of the breast's height \((\d+)% of the half-height\)$/,
+    (share) => `meme yüksekliğinin ortasına uzaklık (yarı yüksekliğe oranı: %${share})`],
+  [/^from the DICOM header$/, () => 'DICOM başlığından'],
+  [/^the posterior nipple line meets the pectoral line inside the image$/,
+    () => 'PNL pektoral çizgiyle görüntünün içinde kesişiyor'],
+  [/^the posterior nipple line meets the pectoral line outside the image, ([\d.]+) mm beyond the edge$/,
+    (mm) => `PNL pektoral çizgiyle görüntünün dışında kesişiyor, kenarın ${mm.replace('.', ',')} mm ötesinde`],
+  [/^the posterior nipple line meets the pectoral line outside the image$/,
+    () => 'PNL pektoral çizgiyle görüntünün dışında kesişiyor'],
+  [/^needs the pectoral line and the nipple$/, () => 'pektoral çizgi ve meme ucu gerekli'],
+  [/^no image geometry stored for this study$/, () => 'bu çalışma için görüntü geometrisi kayıtlı değil'],
+  [/^no pectoral line$/, () => 'pektoral çizgisi yok'],
+  [/^needs the pectoral and the nipple$/, () => 'pektoral ve meme ucu gerekli'],
+  [/^needs the nipple and the breast$/, () => 'meme ucu ve meme dokusu gerekli'],
+  [/^no breast tissue$/, () => 'meme dokusu yok'],
+];
 
 // The measurement code explains a missing value in English; the review screen translates it.
 const REASONS_TR = {
@@ -312,11 +342,17 @@ export function t(key, vars = {}, fallback) {
 }
 
 export function criterionName(item) {
-  return current === 'tr' && CRITERIA_TR[item.id] ? CRITERIA_TR[item.id][0] : item.name;
+  return current === 'tr' && CRITERIA_TR[item.id] ? CRITERIA_TR[item.id] : item.name;
 }
 
 export function criterionDetail(item) {
-  return current === 'tr' && CRITERIA_TR[item.id] ? CRITERIA_TR[item.id][1] : (item.detail || '');
+  const detail = item.detail || '';
+  if (current !== 'tr') return detail;
+  for (const [pattern, translate] of DETAILS_TR) {
+    const match = detail.match(pattern);
+    if (match) return translate(...match.slice(1));
+  }
+  return detail;
 }
 
 export function reason(text) {

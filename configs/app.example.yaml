@@ -23,18 +23,11 @@ rules:
   threshold_mm: 10.0             # |PNL_MLO - D_CC| at or below this is adequate positioning
   severe_mm: 15.0                # beyond this the pair is called clearly inadequate
 
-# Criterion bands, {good, acceptable}: a [low, high] range for angles and pressure, otherwise a single limit.
-# Any key left out keeps its default. Focus and exposure were calibrated on one screening cohort; re-measure
-# them for a different vendor mix.
+# Criterion band, {good, acceptable}. Only "pectoral reaches nipple level" is graded; the pectoral angle, nipple
+# centring and gantry angle are shown as information. (The other bands were retired on 2026-11-20; a config that still
+# names them is accepted and the keys are ignored.)
 criteria:
-  pectoral_angle_deg: {good: [20, 35], acceptable: [15, 45]}
   pectoral_below_nipple_mm: {good: 0, acceptable: -10}   # negative = pectoral ends above the nipple level
-  nipple_profile_mm: {good: 5, acceptable: 10}
-  nipple_centred_mm: {good: 10, acceptable: 20}
-  symmetry_mm: {good: 10, acceptable: 20}
-  clipped_fraction: {good: 0.005, acceptable: 0.02}
-  sharpness: {good: 820, acceptable: 330}                # variance of Laplacian over the tissue
-  compression_kpa: {good: [8, 15], acceptable: [5, 20]}  # estimated, never counted in the score
 
 server:
   host: 127.0.0.1                # 0.0.0.0 to listen on the network (put it behind an authenticated tunnel)

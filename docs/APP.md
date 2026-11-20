@@ -9,11 +9,18 @@ browser.
   mask boundary, the nipple is the mask centroid.
 
 Both routes work in the same 640 px model frame at the same millimetre scale, so their outputs are directly
-comparable — **their disagreement is the signal** that sends a study to a human. Beyond ΔD the app grades the
-criteria a radiographer checks (pectoral angle and depth, inframammary fold, nipple in profile, CC centring,
-left/right symmetry, focus, exposure, and an *estimated* compression pressure that never counts towards the score),
-every contour / point / lesion box is editable, and a written report is generated from the numbers in English or
-Turkish.
+comparable — **their disagreement is the signal** that sends a study to a human. Beyond ΔD the app grades one
+criterion, whether the pectoral muscle reaches the nipple level on the MLO, and shows four values as information
+only, with no grade or colour: the pectoral angle (MLO); the MLO-alone verdict (MLO, the criterion of the MLO-only
+RAUNet paper: the foot of the perpendicular from the nipple — mask centroid of at least 30 px, else the pose point —
+to the fitted pectoral line taken as an infinite line must fall inside the original image widened by 0.25% of its
+longest side; adequate / inadequate, also shown under each breast's verdicts; it never changes ΔD); how far the
+nipple sits from the middle of the breast's
+height on the CC (|nipple row − middle of the first and last breast-tissue rows| in mm, and as a share of the
+half-height), and the gantry angle from the header. Compression, dose, focus, exposure, nipple profile, pectoral on
+CC, inframammary fold, left/right symmetry, the 0–100 criterion score and the mass / calcification boxes were
+removed on 2026-11-20. Every contour and point is editable, and a written report is generated from the numbers in
+English or Turkish.
 
 > Research software. Not a medical device; every result must be checked by a reader.
 
@@ -105,9 +112,7 @@ Relative paths are resolved against the directory of the config file. Every key 
 | `language` | `en` | default interface and report language: `en` or `tr` |
 
 `load_app_config(path, overrides)` accepts `dotted.key=value` overrides (values parsed as YAML), e.g.
-`storage.retention_days=7` or `criteria.sharpness={good: 900, acceptable: 400}`.
-
-The focus and exposure bands were calibrated on one screening cohort; re-measure them for a different vendor mix.
+`storage.retention_days=7` or `criteria.pectoral_below_nipple_mm={good: 0, acceptable: -10}`.
 
 ## Model registry (`configs/models.yaml`)
 
@@ -214,11 +219,20 @@ navy bar, paper background, teal accent, near-black image viewports. English by 
 switch (the choice is remembered per browser; the report has its own language switch).
 
 - **Landing** — drop files or a study folder; staged progress: upload (bytes), server analysis, view loading.
+  **Open a dataset** picks a folder of many studies: the browser groups its DICOMs by the top-level
+  StudyInstanceUID, read by walking each file's header elements (first 16 KB, up to 256 KB; sequences, including a
+  UID nested in one, are skipped). The UID is never shown or sent; files without one are grouped by folder. Studies
+  open one at a time in folder order. A bar under the top bar shows `Dataset <folder> [‹ Previous] [i / N · name]
+  [Next ›] ✕`; the buttons, PageDown / Shift+→ and PageUp / Shift+← move between studies (the keys are ignored
+  while typing or while a drawer, panel or the editor is open), the list jumps anywhere. The next study is analysed
+  in the background; a study that fails is marked ✕ and the bar stays on the study shown. Deleting the shown study
+  keeps the dataset and moves on; ✕ or New study leaves it and cancels anything still in flight. On the last study
+  the Next button becomes Finish ✓, which reports how many studies were opened, failed or not opened.
 - **Review** — the four views in the reading hanging protocol (right breast on the reader's left, MLO above CC)
   with each breast's verdicts on its own side, layer toggles, 1×1 / 2×1 / 1×2 / 2×2 layouts paired by view or by
   breast, synchronised zoom and pan, window / contrast / invert, the criteria drawer, upload notes and the report.
-- **Editor** — every contour, landmark and lesion box is editable (vertex drag / insert / delete, polygon and box
-  drawing, point placement, undo, copy / paste of boxes). Saving recomputes both routes from the edited shapes.
+- **Editor** — every contour and landmark is editable (vertex drag / insert / delete, polygon drawing, point
+  placement, undo). Saving recomputes both routes from the edited shapes.
 - **Viewer** — any tile opens full screen with zoom and pan.
 
 A study id in the URL fragment (`/#<id>`) opens that study.

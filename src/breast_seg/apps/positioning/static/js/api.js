@@ -42,8 +42,15 @@ async function request(url, { timeout = DEFAULT_TIMEOUT_MS, signal, quiet = fals
 
   const isJson = (response.headers.get('content-type') || '').includes('application/json');
   const payload = isJson ? await response.json().catch(() => null) : null;
-  if (!response.ok) throw new Error(errorMessage(payload, response.status));
+  if (!response.ok) throw httpError(payload, response.status);
   return payload;
+}
+
+/** A user-facing Error that also carries the HTTP status (callers tell "gone" from "failed"). */
+function httpError(payload, status) {
+  const error = new Error(errorMessage(payload, status));
+  error.status = status;
+  return error;
 }
 
 // FastAPI sends a string `detail` for the app's own errors and a list of field errors for request-validation
@@ -90,7 +97,7 @@ function createStudy(files, { onProgress = () => {}, signal } = {}) {
       done();
       const payload = xhr.response;
       if (xhr.status >= 200 && xhr.status < 300) resolve(payload);
-      else reject(new Error(errorMessage(payload, xhr.status)));
+      else reject(httpError(payload, xhr.status));
     };
     xhr.onerror = () => { done(); reject(new Error(t('err_network'))); };
     xhr.ontimeout = () => { done(); reject(new Error(t('err_timeout'))); };
@@ -110,7 +117,7 @@ const id = (value) => encodeURIComponent(value);
 export const api = {
   health: () => request('/api/health', { timeout: 8000, quiet: true }),
   listStudies: () => request('/api/studies'),
-  getStudy: (studyId) => request(`/api/studies/${id(studyId)}`),
+  getStudy: (studyId, { signal } = {}) => request(`/api/studies/${id(studyId)}`, { signal }),
   getReport: (studyId, lang) => request(`/api/studies/${id(studyId)}/report?lang=${id(lang)}`),
   getLabels: (studyId) => request(`/api/studies/${id(studyId)}/labels`),
   deleteAll: () => request('/api/studies', { method: 'DELETE' }),

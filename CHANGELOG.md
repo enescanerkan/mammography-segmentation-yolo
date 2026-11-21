@@ -26,6 +26,10 @@ with a command line, a review web application, a training framework and the anno
 - **Windows desktop app** (`packaging/windows`, `breast_seg.apps.desktop`): the review app in a native window, CPU
   only, weights included; built, self-tested and published by GitHub Actions on every change (`dev-build`) and for
   every `v*` tag. The review app's weights are published in the `weights-v1` release (`packaging/weights.py`).
+- **Runtime benchmark** (`breast_seg.benchmark`, `breast-seg benchmark runtime` / `summary`): one MLO-CC pair from
+  the DICOM files to the adequacy decision for every pipeline in one interleaved session (rotating order,
+  warm-up, two passes, pinned cores, GPU guard), the disturbed-pass rule and composition of undisturbed passes;
+  the 146 held-out VinDr-Mammo pairs of Table 11 (`configs/benchmark/`).
 - Documentation: `docs/APP.md`, `docs/MODELS.md`, `docs/TRAINING.md`, `docs/EVALUATION.md`.
 - Architecture figures of every model (light and dark SVG, `docs/figures/architectures`, drawn by
   `tools/figures/architectures.py`) and a model overview in the README.

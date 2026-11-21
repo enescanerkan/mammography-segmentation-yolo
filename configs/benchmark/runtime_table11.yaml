@@ -1,0 +1,32 @@
+# End-to-end runtime of one MLO-CC pair, from the two DICOM files to the adequacy decision (Table 11 of the
+# segmentation paper). Every pipeline with its released preprocessing, all in one interleaved session per device.
+#
+#   breast-seg benchmark runtime configs/benchmark/runtime_table11.yaml --pairs PAIRS.csv --device 0
+#   breast-seg benchmark runtime configs/benchmark/runtime_table11.yaml --pairs PAIRS.csv --device cpu --threads 8
+#
+# Weights follow each training config's conventions (<runs_dir>/<name>/..., nnU-Net: <nnunet_results>/...), or
+# give them per pipeline with --weights NAME=PATH. Configuration names: <pipeline>_tta / <pipeline>_no_tta for the
+# models with a flip (nnU-Net: mirroring) setting, <pipeline> for YOLO26m-seg and CRAUNet (one setting); the suffix
+# _unbatched runs one forward per image and flip.
+pipelines:
+  segformer_b3: {train_config: ../train/segformer_b3.yaml}
+  nnunet: {train_config: ../train/nnunet_resenc_m.yaml}
+  yolo26m: {train_config: ../train/yolo26m_seg_300ep.yaml}
+  unet: {train_config: ../train/unet_plain.yaml}
+# CRAUNet is an external model: point code_dir at its released repository (or use --craunet-code) and give its
+# weights; without code_dir the craunet configuration is skipped.
+craunet:
+  code_dir: ""
+  weights_dir: ""        # default: <code_dir>/../cv_results (mlo/fold<k>/mlo_model.pth, cc/fold<k>/cc_model.pth)
+  fold: 0
+configurations: [craunet, segformer_b3_tta, segformer_b3_no_tta, nnunet_tta, nnunet_no_tta, yolo26m, unet_tta,
+                 unet_no_tta]
+passes: 2              # every pair passed twice
+warmup: 5              # pairs before the first pass, not measured
+seed: 20261120         # order of the configurations
+threads: 8             # threads = pinned physical cores
+core_sampling_s: 5.0
+card_check_every: 20   # GPU: foreign-process check every N pairs (and at start and end)
+allowed_pids: []       # GPU: persistent processes allowed to hold memory on the card
+batched: true          # one forward for both views (and their flips) where one model serves both
+flops: true

@@ -8,6 +8,8 @@
     breast-seg cv configs/cv/cv10_yolo26m.yaml [--fold 3] [--prepare-only] [--no-train --no-predict]
     breast-seg evaluate --config configs/cv/cv10_yolo26m.yaml --preds DIR --out DIR --name NAME
     breast-seg compare configs/compare.yaml          (start from configs/compare.example.yaml)
+    breast-seg benchmark runtime configs/benchmark/runtime_table11.yaml --pairs PAIRS.csv --device 0
+    breast-seg benchmark summary runtime_gpu.json runtime_cpu.json [--compose runtime_cpu_undisturbed]
 
 Every YAML-driven command takes ``--set key.sub=value`` (repeatable; for ``evaluate`` and ``compare`` the keys are
 those of the ``evaluation:`` / ``compare:`` section) and ``--paths`` (machine paths file, default
@@ -198,6 +200,66 @@ def cmd_compare(args: argparse.Namespace) -> int:
     return 0
 
 
+# ── benchmarks ───────────────────────────────────────────────────────────────
+def cmd_benchmark_runtime(args: argparse.Namespace) -> int:
+    from breast_seg.benchmark.runtime import run_cli  # pins the process before numpy / torch are imported
+
+    return run_cli(args)
+
+
+def cmd_benchmark_summary(args: argparse.Namespace) -> int:
+    from breast_seg.benchmark.runtime import summary_cli
+
+    return summary_cli(args)
+
+
+def _benchmark_parser(sub) -> None:
+    b = sub.add_parser("benchmark", help="runtime benchmark of the released pipelines (Table 11)",
+                       description="Runtime benchmark of the released pipelines (Table 11).")
+    bsub = b.add_subparsers(dest="benchmark", required=True, metavar="BENCHMARK")
+    r = bsub.add_parser("runtime", help="time every pipeline end to end in one interleaved session",
+                        description="Time one MLO-CC pair end to end (DICOM files to adequacy decision) for every "
+                                    "configuration in one interleaved session.")
+    r.add_argument("config", help="benchmark YAML (e.g. configs/benchmark/runtime_table11.yaml)")
+    r.add_argument("--pairs", required=True, help="CSV: study, side and mlo_dicom / cc_dicom (paths) or mlo_sop / "
+                                                  "cc_sop (with --dicom-root); optional reference_delta_mm")
+    r.add_argument("--dicom-root", help="folder of the DICOM files (relative paths / SOP-named files)")
+    r.add_argument("--device", required=True, help='"cpu", "cuda" (first visible GPU), or a GPU index such as "0"')
+    r.add_argument("--threads", type=int, help="threads = pinned physical cores (default from the config: 8)")
+    r.add_argument("--cores", help="comma-separated logical CPUs to pin to (default: the least-loaded physical cores)")
+    r.add_argument("--core-sampling-s", type=float, help="seconds of load sampling for the core choice (default 5)")
+    r.add_argument("--passes", type=int, help="passes over all pairs (default 2)")
+    r.add_argument("--warmup", type=int, help="warm-up pairs, not measured (default 5)")
+    r.add_argument("--seed", type=int, help="seed of the configuration order")
+    r.add_argument("--configurations", help="comma-separated configurations (default from the config)")
+    r.add_argument("--unbatched", action="store_true", help="one forward per image and flip in every configuration")
+    r.add_argument("--allowed-pids", help="GPU: comma-separated PIDs of persistent processes allowed on the card")
+    r.add_argument("--card-check-every", type=int, help="GPU: check the card for foreign processes every N pairs")
+    r.add_argument("--weights", action="append", metavar="PIPELINE=PATH",
+                   help="weights of a pipeline instead of its training config's (nnU-Net: the model folder)")
+    r.add_argument("--stored", action="append", metavar="PIPELINE=CSV",
+                   help="stored per-pair results (study, side, delta_mm) to check the decisions against")
+    r.add_argument("--craunet-code", help="root of the released CRAUNet repository (CRAUNet is skipped without it)")
+    r.add_argument("--craunet-weights", help="CRAUNet cross-validation folder (<view>/fold<k>/<view>_model.pth)")
+    r.add_argument("--craunet-fold", type=int, help="CRAUNet fold whose weights are timed (default 0)")
+    r.add_argument("--first", type=int, help="only the first N pairs (smoke test)")
+    r.add_argument("--out", help="output folder (default <results_dir>/runtime)")
+    r.add_argument("--name", help="output file name without suffix (default runtime_<cpu|gpu>)")
+    r.add_argument("--overwrite", action="store_true", help="replace an existing session of the same name")
+    r.add_argument("--no-flops", action="store_true", help="skip the FLOP count")
+    r.add_argument("--set", action="append", metavar="KEY=VALUE", help="override a config value (repeatable)")
+    r.add_argument("--paths", help="machine paths file (default: $BREAST_SEG_PATHS or configs/paths.yaml)")
+    r.set_defaults(func=cmd_benchmark_runtime)
+    m = bsub.add_parser("summary", help="report sessions, flag disturbed passes, compose undisturbed passes",
+                        description="Markdown report of runtime sessions with their disturbed passes; --compose "
+                                    "builds one result from the undisturbed passes of all given sessions.")
+    m.add_argument("sessions", nargs="+", help="session JSON files (the CSV next to each is read too)")
+    m.add_argument("--compose", metavar="NAME", help="write NAME.json / NAME.csv from the undisturbed passes")
+    m.add_argument("--out", help="output folder (default: the first session's folder)")
+    m.add_argument("--report", default="runtime_summary", help="report file name without .md")
+    m.set_defaults(func=cmd_benchmark_summary)
+
+
 # ── parser ───────────────────────────────────────────────────────────────────
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="breast-seg", description="Mammography segmentation, landmarks and positioning review.")
@@ -250,6 +312,7 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--out", required=True, help="output directory")
     s.add_argument("--name", default="eval", help="file name prefix")
     yaml_cmd("compare", cmd_compare, "ground truth vs pose landmarks vs segmentation on the compare set")
+    _benchmark_parser(sub)
     return p
 
 

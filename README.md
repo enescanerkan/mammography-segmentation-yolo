@@ -222,6 +222,72 @@ breast-seg evaluate --config configs/cv/cv10_yolo26m.yaml --preds runs/preds --o
 Training configs exist for every model family in the catalogue (`configs/train/`); cross-validation configs for
 YOLO26m-seg, SegFormer-B3 and nnU-Net (`configs/cv/`). See [docs/TRAINING.md](docs/TRAINING.md).
 
+## Runtime benchmark (Table 11)
+
+`breast-seg benchmark runtime` times one MLO–CC pair **end to end**: reading the two DICOM files (pydicom, pixel
+decoding, VOI LUT), the pipeline's released preprocessing, the network(s), and the measurement rule (pectoral line
+fit, nipple, PNL and D<sub>CC</sub>, `ΔD ≤ 10 mm`) up to the adequacy decision. The configurations of the paper's
+Table 11:
+
+| Configuration | Pipeline |
+|---|---|
+| `craunet` | CRAUNet, two view-specific landmark models (MLO + CC), 512 × 512, its own released preprocessing (one setting) |
+| `segformer_b3_tta` / `_no_tta` | SegFormer-B3 with / without horizontal-flip test-time augmentation |
+| `nnunet_tta` / `_no_tta` | nnU-Net ResEnc-M with / without its mirroring |
+| `yolo26m` | YOLO26m-seg (one setting, no TTA) |
+| `unet_tta` / `_no_tta` | U-Net with / without horizontal flip |
+
+**Protocol.** All pipelines run in one process. Every pair runs every configuration, and the order of the
+configurations rotates by one from pair to pair (seeded base order), so a background load hits all of them alike.
+Five warm-up pairs are not measured; then all pairs are passed twice, one pair at a time, the two views in one
+batched forward wherever one model serves both (`_unbatched` configurations run image by image). The process is
+pinned to the *N* least-loaded physical cores and runs *N* threads. A GPU session checks its card for other compute
+processes at the start, every 20 pairs and at the end, and stops with exit code 4 (`MEASUREMENT INVALID`) if it
+finds one (`--allowed-pids` lists persistent processes that may hold memory on the card).
+
+```bash
+pip install -e ".[models,dicom,segformer,nnunet]"
+# GPU 0 (keep the card otherwise idle)
+breast-seg benchmark runtime configs/benchmark/runtime_table11.yaml --device 0 \
+    --pairs configs/benchmark/vindr_heldout_pairs.csv --dicom-root <VinDr-Mammo images> \
+    --craunet-code <CRAUNet repository> --craunet-weights <CRAUNet cv_results> --out runtime --name runtime_gpu
+# CPU: 8 threads on the 8 least-loaded physical cores
+breast-seg benchmark runtime configs/benchmark/runtime_table11.yaml --device cpu --threads 8 \
+    --pairs configs/benchmark/vindr_heldout_pairs.csv --dicom-root <VinDr-Mammo images> --out runtime --name runtime_cpu
+# report (and the Table 11 layout of the last session per device)
+breast-seg benchmark summary runtime/runtime_gpu.json runtime/runtime_cpu.json
+```
+
+Weights follow the training configs (`configs/paths.yaml`, see [Training and evaluation](#training-and-evaluation));
+`--weights segformer_b3=<folder>` (nnU-Net: the trained model folder) overrides one pipeline. CRAUNet is not part
+of this package: give the root of its released repository and its cross-validation folder
+(`mlo/fold0/mlo_model.pth`, `cc/fold0/cc_model.pth`); without `--craunet-code` the `craunet` configuration is
+skipped. It needs scikit-image, SciPy and torchvision (its own dependencies).
+
+**Outputs.** `<name>.csv` has one row per pair and configuration (read / preprocessing / network / measurement
+seconds, PNL, D<sub>CC</sub>, ΔD, decision, nipple source, load average). `<name>.json` gives, per configuration,
+the seconds per pair as median [IQR] over all measurements, pairs per minute (`60 × measurements / summed time`),
+every pass on its own, the spread between the passes (flagged above 10 %), model size and GFLOPs, and the disturbed
+passes. `--stored <pipeline>=<csv>` (columns `study`, `side`, `delta_mm`) checks every decision against stored
+per-pair predictions; a `reference_delta_mm` column in the pairs file adds the decision accuracy.
+
+**Disturbed passes.** A pass is *disturbed* when more than 5 % of its measurements take longer than 1.5 × the median
+of the same configuration in the same session: something else on the machine slowed it down (pinning keeps the
+benchmark on its cores, not other processes off them). The paper's CPU column comes from the undisturbed passes of
+two CPU sessions:
+
+```bash
+breast-seg benchmark summary runtime/runtime_cpu.json runtime/runtime_cpu_2.json --compose runtime_cpu_undisturbed
+```
+
+which keeps the undisturbed passes in time order and recomputes every number from them.
+
+**Pairs.** `configs/benchmark/vindr_heldout_pairs.csv` lists the 146 held-out pairs the table was measured on as
+public VinDr-Mammo identifiers: `StudyInstanceUID`, side and the `SOPInstanceUID` of the MLO and CC image. The files
+are found by name (`<SOPInstanceUID>.dicom` or `.dcm`) anywhere under `--dicom-root`; a pairs file with `mlo_dicom`
+/ `cc_dicom` paths works as well. Absolute times depend on the machine; the protocol makes the configurations
+comparable within a session.
+
 ## Annotation toolkit
 
 ```bash
@@ -246,10 +312,11 @@ src/breast_seg/
   datasets/             dataset builders and exporters, split checks
   evaluation/           metrics, PNL rule, statistics
   compare/              ground truth vs landmarks vs segmentation on a labelled set
+  benchmark/            end-to-end runtime benchmark (Table 11)
   geometry.py           PNL and chest-wall geometry
   registry.py           model registry
   cli.py                the breast-seg command
-configs/                models.yaml, app example, train / datasets / cv configs, paths example
+configs/                models.yaml, app example, train / datasets / cv / benchmark configs, paths example
 packaging/              Windows desktop build (PyInstaller spec, launcher) and the weights manifest
 tools/annotation/       PyQt5 annotation toolkit (MedSAM2, manual, positioning)
 docs/                   APP, MODELS, TRAINING, EVALUATION; figures/architectures (model diagrams)

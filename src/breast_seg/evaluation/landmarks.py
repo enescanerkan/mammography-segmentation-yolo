@@ -83,6 +83,51 @@ def centroid(mask: np.ndarray, min_px: int = 1) -> Optional[np.ndarray]:
     return np.array([xs.mean(), ys.mean()])
 
 
+#: Nipple-probability level of the second step of :func:`nipple_point`.
+NIPPLE_PROBABILITY_THRESHOLD = 0.02
+
+
+def largest_component_centroid(mask: np.ndarray) -> Optional[np.ndarray]:
+    """``(x, y)`` centroid of the largest 8-connected component of ``mask``, or ``None`` for an empty mask."""
+    import cv2
+
+    m = np.asarray(mask).astype(np.uint8)
+    if not m.any():
+        return None
+    _, lab, stats, _ = cv2.connectedComponentsWithStats(m, connectivity=8)
+    k = 1 + int(np.argmax(stats[1:, cv2.CC_STAT_AREA]))
+    ys, xs = np.nonzero(lab == k)
+    return np.array([xs.mean(), ys.mean()])
+
+
+def nipple_point(label: np.ndarray, fallback: Optional[np.ndarray] = None,
+                 threshold: float = NIPPLE_PROBABILITY_THRESHOLD) -> Tuple[Optional[np.ndarray], str]:
+    """Nipple of one view as ``((x, y) | None, source)``; the rule has no minimum size.
+
+    1. ``"argmax"``: the label map has nipple pixels (value 3): centroid of their largest 8-connected component.
+    2. Otherwise ``fallback`` of the same forward pass. A float array is the nipple probability: binarised at
+       ``threshold``, centroid of the largest component (``"low_confidence"``); when no pixel reaches it, the pixel
+       of highest probability (``"max_probability"``). A ``uint8`` / ``bool`` array is an instance mask (YOLO's
+       low-confidence nipple instance): centroid of its largest component (``"low_confidence"``).
+    3. ``(None, "none")``: no nipple pixel and no (or an empty instance) fallback.
+    """
+    xy = largest_component_centroid(np.asarray(label) == 3)
+    if xy is not None:
+        return xy, "argmax"
+    if fallback is None:
+        return None, "none"
+    fallback = np.asarray(fallback)
+    if fallback.dtype == np.uint8 or fallback.dtype == bool:
+        xy = largest_component_centroid(fallback > 0)
+        return (xy, "low_confidence") if xy is not None else (None, "none")
+    p = fallback.astype(np.float32)
+    xy = largest_component_centroid(p >= threshold)
+    if xy is not None:
+        return xy, "low_confidence"
+    y, x = np.unravel_index(int(np.argmax(p)), p.shape)
+    return np.array([float(x), float(y)]), "max_probability"
+
+
 def point_line_distance(p: Point, a: Point, b: Point) -> float:
     """Distance from ``p`` to the infinite line through ``a`` and ``b`` (``|p - a|`` for a degenerate line)."""
     a = np.asarray(a, float)

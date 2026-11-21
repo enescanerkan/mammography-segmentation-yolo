@@ -24,6 +24,8 @@
 !docs/figures/*.png
 !assets/*.png
 !src/breast_seg/apps/positioning/static/**/*.png
+# public dataset identifiers of the runtime benchmark's pairs (no labels, no paths)
+!configs/benchmark/vindr_heldout_pairs.csv
 
 # --- model weights (distributed separately, see docs/MODELS.md) --------------
 *.pt

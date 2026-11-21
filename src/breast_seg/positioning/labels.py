@@ -6,7 +6,10 @@ silently emptying a malformed field would wipe them.
 """
 from __future__ import annotations
 
+import hashlib
+import json
 import math
+import re
 import time
 from typing import Any, Dict, List, Mapping, Optional
 from uuid import uuid4
@@ -22,6 +25,14 @@ MAX_LESIONS = 64
 
 class LabelError(ValueError):
     """The request body is malformed; the message is user-facing."""
+
+
+def fingerprint(points: Any) -> str:
+    """16 hex characters naming a contour's points (rounded to 0.01 px, as stored): the ``"cleaned"`` mark that
+    "Smooth / clean labels" leaves on the contours it returned (:func:`breast_seg.positioning.label_cleanup.clean_view`).
+    """
+    rounded = [[round(float(x), 2), round(float(y), 2)] for x, y in points]
+    return hashlib.sha1(json.dumps(rounded).encode("ascii")).hexdigest()[:16]
 
 
 def clean_point(value: Any) -> Optional[List[float]]:
@@ -61,12 +72,18 @@ def clean_polygon(entry: Any) -> Optional[Dict[str, Any]]:
     points = [p for p in (clean_point(v) for v in (raw_points if isinstance(raw_points, list) else [])) if p]
     if len(points) < 3 or len(points) > MAX_POLYGON_POINTS:
         return None
-    return {
+    cleaned = {
         "points": points,
         "confidence": _number(entry.get("confidence") or 0.0, 0.0),
         "rescued": bool(entry.get("rescued")),
+        "brightened": bool(entry.get("brightened")),
         "edited": bool(entry.get("edited")),
     }
+    # The fingerprint "Smooth / clean labels" leaves on the contours it returned (label_cleanup.clean_view).
+    mark = entry.get("cleaned")
+    if isinstance(mark, str) and re.fullmatch(r"[0-9a-f]{16}", mark):
+        cleaned["cleaned"] = mark
+    return cleaned
 
 
 def _clean_lesion(lesion: Any) -> Optional[Dict[str, Any]]:
@@ -131,13 +148,87 @@ def clean_labels(payload: Any) -> Dict[str, Dict[str, Any]]:
     return cleaned
 
 
+def _lesion_key(lesion: Any) -> Optional[tuple]:
+    """What makes two lesions the same label: box, class and confidence, at the cleaned precision."""
+    cleaned = _clean_lesion(lesion)
+    if cleaned is None:
+        return None
+    return tuple(cleaned["box"]), cleaned["label"], round(cleaned["confidence"], 4)
+
+
+def same_labels(image: Mapping[str, Any], update: Mapping[str, Any]) -> bool:
+    """True when ``update`` (cleaned) carries exactly the view's stored labels, compared at the cleaned precision.
+
+    A view sent back unchanged — an edit undone, a vertex dragged back — is not an edit and must not be marked as one.
+    """
+    stored_polygons = {}
+    for name, shape in (image.get("polygons") or {}).items():
+        polygon = clean_polygon(shape) if name in EDITABLE_CLASSES else None
+        if polygon:
+            stored_polygons[name] = polygon["points"]
+    stored_points = {}
+    for name, value in ((image.get("landmarks") or {}).get("points") or {}).items():
+        point = clean_point(value) if name in EDITABLE_POINTS else None
+        if point:
+            stored_points[name] = point
+    stored_lesions = [key for key in (_lesion_key(lesion) for lesion in image.get("lesions") or []) if key]
+    return (stored_polygons == {name: shape["points"] for name, shape in update["polygons"].items()}
+            and stored_points == dict(update["points"])
+            and stored_lesions == [_lesion_key(lesion) for lesion in update["lesions"]])
+
+
+def _reconcile(image: Mapping[str, Any], update: Mapping[str, Any]) -> Dict[str, Any]:
+    """``update`` with everything the reviewer did not touch put back as it was stored.
+
+    * A contour whose points equal the stored ones stays the stored contour, whatever flags came with it: a vertex
+      dragged away and dropped back is not an edit, and a client cannot hand a model contour back as edited, change
+      its confidence or drop the "rescued" / "found after brightening" marks that ask the reader to check it.
+    * A contour whose points differ is the reviewer's now: it is no longer "rescued" or "found after brightening"
+      (the reviewer has just set the position those marks ask about).
+    * The ``"cleaned"`` mark of "Smooth / clean labels" is kept in both cases when it names the contour's points
+      (it is a fingerprint of them, so a client cannot attach it to anything else).
+    * A lesion sent back with the same box, class and confidence stays the stored one, with its id and without an
+      ``edited`` mark; only a changed or a new one is taken as cleaned.
+    """
+    polygons = {}
+    for name, polygon in update["polygons"].items():
+        kept = (image.get("polygons") or {}).get(name)
+        stored = clean_polygon(kept)
+        mark = polygon.get("cleaned")
+        if mark is not None and mark != fingerprint(polygon["points"]):
+            polygon = {key: value for key, value in polygon.items() if key != "cleaned"}
+            mark = None
+        if stored is not None and stored["points"] == polygon["points"]:
+            polygons[name] = {**kept, "cleaned": mark} if mark and kept.get("cleaned") != mark else kept
+        else:
+            polygons[name] = {**polygon, "rescued": False, "brightened": False}
+
+    kept = [(key, lesion) for key, lesion in ((_lesion_key(lesion), lesion) for lesion in image.get("lesions") or [])
+            if key]
+    lesions = []
+    for lesion in update["lesions"]:
+        match = next((index for index, (key, _) in enumerate(kept) if key == _lesion_key(lesion)), None)
+        lesions.append(kept.pop(match)[1] if match is not None else lesion)
+    return {"polygons": polygons, "points": update["points"], "lesions": lesions}
+
+
 def apply_labels(record: Dict[str, Any], cleaned: Mapping[str, Mapping[str, Any]]) -> int:
-    """Replace the labels of every view named in ``cleaned``; returns how many views matched."""
+    """Replace the labels of every view named in ``cleaned``; returns how many views matched.
+
+    A matched view whose labels are unchanged is left as it is, so it keeps its model-made status; in a changed
+    view, what was not touched keeps its stored form (see :func:`_reconcile`).
+    """
     touched = 0
+    changed = 0
     for image in record["images"]:
         update = cleaned.get(image["view_key"])
         if update is None:
             continue
+        touched += 1
+        if same_labels(image, update):
+            continue
+        changed += 1
+        update = _reconcile(image, update)
         image["polygons"] = update["polygons"]
         image["landmarks"] = {
             **(image.get("landmarks") or {}),
@@ -146,8 +237,7 @@ def apply_labels(record: Dict[str, Any], cleaned: Mapping[str, Mapping[str, Any]
             "edited": True,
         }
         image["lesions"] = update["lesions"]
-        touched += 1
-    if touched:
+    if changed:
         record["edited"] = time.time()
     return touched
 

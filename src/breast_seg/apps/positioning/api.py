@@ -1,13 +1,17 @@
 """HTTP API and the single-page client of the positioning review app.
 
     GET    /api/health                              model status, rules, storage usage, client defaults
-    GET    /api/studies                             recent studies
-    POST   /api/studies                             multipart ``files`` (DICOMs or a study folder) -> study record
-    DELETE /api/studies                             delete every stored study
+    GET    /api/studies?limit=N                     the N most recent studies (40), and how many are stored
+    POST   /api/studies/lookup                      {"keys": [...]} -> the stored studies carrying those study keys
+    POST   /api/studies                             multipart ``files`` (DICOMs or a study folder) -> study record;
+                                                    an ``X-Study-Key`` header keys it for a dataset (see storage)
+    DELETE /api/studies?expected=N                  delete every stored study (refused unless N are stored)
     GET    /api/studies/{id}                        full study record
     GET    /api/studies/{id}/labels                 coordinates only, in the 640 frame
     PUT    /api/studies/{id}/labels                 replace edited labels, recompute every measurement
     PUT    /api/studies/{id}/rules                  move the delta-D threshold, re-decide every verdict
+    POST   /api/studies/{id}/clean                  {"view_key", "polygons"} -> the contours cleaned and smoothed
+                                                    (the editor's "Smooth / clean labels"; nothing is stored)
     GET    /api/studies/{id}/report?lang=en|tr      written report
     GET    /api/studies/{id}/image/{view}.png       display render
     DELETE /api/studies/{id}                        delete one study
@@ -67,7 +71,10 @@ def create_app(config: Optional[AppConfig] = None, engine: Optional[Engine] = No
 
     @app.exception_handler(ServiceError)
     async def service_error(_, exc: ServiceError):
-        return JSONResponse(status_code=exc.status, content={"detail": exc.message})
+        content: Dict[str, Any] = {"detail": exc.message}
+        if exc.code:  # what the page translates by; the sentence stays for English and for other clients
+            content.update(code=exc.code, params=exc.params)
+        return JSONResponse(status_code=exc.status, content=content)
 
     @app.exception_handler(Exception)
     async def unhandled(_, exc: Exception):
@@ -80,8 +87,12 @@ def create_app(config: Optional[AppConfig] = None, engine: Optional[Engine] = No
         return service.health()
 
     @app.get("/api/studies")
-    def list_studies() -> Dict[str, Any]:
-        return service.list_studies()
+    def list_studies(limit: int = 40) -> Dict[str, Any]:
+        return service.list_studies(limit)
+
+    @app.post("/api/studies/lookup")
+    def lookup_studies(payload: Any = Body(...)) -> Dict[str, Any]:
+        return service.lookup(payload)
 
     @app.post("/api/studies")
     async def create_study(request: Request) -> Dict[str, Any]:
@@ -92,16 +103,22 @@ def create_app(config: Optional[AppConfig] = None, engine: Optional[Engine] = No
                 max_files=config.upload.max_files, max_file_bytes=config.upload.max_file_mb * 1024 * 1024)
             files = await reader.read(request.stream())
         except UploadError as exc:
-            raise ServiceError(400, str(exc)) from None
-        return await run_in_threadpool(service.ingest, files)
+            raise ServiceError(400, str(exc), exc.code, **exc.params) from None
+        headers = request.headers  # what a dataset upload says about the study (see PositioningService.ingest)
+        return await run_in_threadpool(service.ingest, files, headers.get("x-study-key"),
+                                       headers.get("x-study-unopened") == "1", headers.get("x-study-left-out"))
 
     @app.delete("/api/studies")
-    def delete_all_studies() -> Dict[str, Any]:
-        return service.delete_all()
+    def delete_all_studies(expected: Optional[int] = None) -> Dict[str, Any]:
+        return service.delete_all(expected)
 
     @app.get("/api/studies/{study_id}")
     def get_study(study_id: str) -> Dict[str, Any]:
         return service.study(study_id)
+
+    @app.post("/api/studies/{study_id}/opened")
+    def mark_opened(study_id: str) -> Dict[str, Any]:
+        return service.mark_opened(study_id)
 
     @app.get("/api/studies/{study_id}/labels")
     def get_labels(study_id: str) -> Dict[str, Any]:
@@ -110,6 +127,10 @@ def create_app(config: Optional[AppConfig] = None, engine: Optional[Engine] = No
     @app.put("/api/studies/{study_id}/labels")
     def put_labels(study_id: str, payload: Any = Body(...)) -> Dict[str, Any]:
         return service.put_labels(study_id, payload)
+
+    @app.post("/api/studies/{study_id}/clean")
+    def clean_view(study_id: str, payload: Any = Body(...)) -> Dict[str, Any]:
+        return service.clean_view(study_id, payload)
 
     @app.put("/api/studies/{study_id}/rules")
     def put_rules(study_id: str, payload: Any = Body(...)) -> Dict[str, Any]:

@@ -8,7 +8,7 @@ upload is still arriving.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import AsyncIterator, Dict, List, Optional
+from typing import Any, AsyncIterator, Dict, List, Optional
 
 try:  # python-multipart >= 0.0.13 ships the module as ``python_multipart``
     from python_multipart.multipart import MultipartParser, parse_options_header
@@ -17,7 +17,13 @@ except ImportError:  # pragma: no cover - older releases
 
 
 class UploadError(ValueError):
-    """The request is not an acceptable multipart upload; the message is user-facing."""
+    """The request is not an acceptable multipart upload; the message is user-facing. ``code`` and ``params`` name
+    the refusals a reader can meet (see ``service.ERRORS``)."""
+
+    def __init__(self, message: str, code: str = "", **params: Any) -> None:
+        super().__init__(message)
+        self.code = code
+        self.params = params
 
 
 @dataclass
@@ -96,7 +102,8 @@ class InMemoryMultipartReader:
         if name != self.field or b"filename" not in options:
             return  # other form fields are ignored
         if len(self.files) >= self.max_files:
-            raise UploadError(f"At most {self.max_files} files can be uploaded at once.")
+            raise UploadError(f"At most {self.max_files} files can be uploaded at once.", "too_many_files",
+                              limit=self.max_files)
         self._name = _decode(options[b"filename"], self._charset)
         self._buffer = bytearray()
 

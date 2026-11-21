@@ -38,10 +38,11 @@ from pydicom.uid import ExplicitVRBigEndian, ExplicitVRLittleEndian, ImplicitVRL
 STATIC = Path(__file__).resolve().parents[1] / "src" / "breast_seg" / "apps" / "positioning" / "static"
 DATASET_JS = STATIC / "js" / "dataset.js"
 STUDY = "1.2.826.0.1.3680043.8.498.1"
+MEDIA_DIRECTORY = "1.2.840.10008.1.3.10"
 NESTED = "9.9.9.9"
 
 
-def _dataset(*, nested=True, undefined=True, study=True, private_ob=0):
+def _dataset(*, nested=True, undefined=True, study=True, private_ob=0, pixels=False):
     ds = Dataset()
     ds.SOPClassUID = "1.2.840.10008.5.1.4.1.1.1.2"
     ds.SOPInstanceUID = STUDY + ".5"
@@ -60,7 +61,30 @@ def _dataset(*, nested=True, undefined=True, study=True, private_ob=0):
     if study:
         ds.StudyInstanceUID = STUDY
     ds.SeriesInstanceUID = STUDY + ".2"
+    if pixels:
+        ds.Rows, ds.Columns, ds.BitsAllocated, ds.BitsStored, ds.HighBit = 4, 4, 16, 12, 11
+        ds.SamplesPerPixel, ds.PixelRepresentation, ds.PhotometricInterpretation = 1, 0, "MONOCHROME2"
+        ds.PixelData = b"\0" * 32
     return ds
+
+
+def _dicomdir():
+    """A media directory: its own SOP class, directory records in a sequence, no top-level study UID, no pixels."""
+    record = Dataset()
+    record.DirectoryRecordType = "STUDY"
+    record.StudyInstanceUID = NESTED
+    ds = Dataset()
+    ds.FileSetID = "SET"
+    ds.DirectoryRecordSequence = Sequence([record])
+    meta = FileMetaDataset()
+    meta.MediaStorageSOPClassUID = MEDIA_DIRECTORY
+    meta.MediaStorageSOPInstanceUID = STUDY + ".9"
+    meta.TransferSyntaxUID = ExplicitVRLittleEndian
+    ds.file_meta = meta
+    ds.is_little_endian, ds.is_implicit_VR = True, False
+    buffer = io.BytesIO()
+    ds.save_as(buffer, write_like_original=False)
+    return buffer.getvalue()
 
 
 def _file(ds, syntax=ExplicitVRLittleEndian):
@@ -112,6 +136,17 @@ def _cases():
         "long_header_first_16k": (long_header, 16 * 1024, {"dicom": True, "uid": "", "more": True}),
         "long_header_whole": (long_header, None, {"dicom": True, "uid": STUDY, "more": False}),
         "text_file": (b"hello world\n" * 200, None, {"dicom": False, "uid": "", "more": False}),
+        # image or not: the walk goes on to the pixel data element, or to the end of the file without one
+        "image_with_pixel_data": (_file(_dataset(pixels=True)), None,
+                                  {"dicom": True, "uid": STUDY, "pixels": True, "absent": False}),
+        "no_pixel_data_to_the_end": (_file(_dataset()), None,
+                                     {"dicom": True, "uid": STUDY, "pixels": None, "end": True}),
+        "pixel_data_past_these_bytes": (_file(_dataset(pixels=True, private_ob=40_000))[:20_000], None,
+                                        {"dicom": True, "pixels": None, "end": False}),
+        "no_top_level_study_uid": (_file(_dataset(study=False, pixels=True)), None,
+                                   {"dicom": True, "uid": "", "more": False, "absent": True, "pixels": True}),
+        "dicomdir": (_dicomdir(), None,
+                     {"dicom": True, "uid": "", "sopClass": MEDIA_DIRECTORY, "pixels": None, "end": True}),
         "zeros": (b"\0" * 300, None, {"dicom": False, "uid": "", "more": False}),
     }
 
@@ -153,7 +188,10 @@ class _QuietHandler(SimpleHTTPRequestHandler):
         pass
 
 
-def _run_chromium(chrome, cases, tmp_path):
+def run_in_chromium(chrome, body, tmp_path):
+    """Evaluate ``body`` (the inside of an async function; ``ORIGIN`` is the static folder's URL) in headless
+    Chromium and return what it returns. The page serves the app's static folder, so its modules import as they
+    do in the app."""
     websocket = pytest.importorskip("websocket")
     server = ThreadingHTTPServer(("127.0.0.1", 0), functools.partial(_QuietHandler, directory=str(STATIC)))
     origin = f"http://127.0.0.1:{server.server_address[1]}"
@@ -174,8 +212,7 @@ def _run_chromium(chrome, cases, tmp_path):
                 time.sleep(0.1)
         assert page, "headless Chromium did not start"
         ws = websocket.create_connection(page["webSocketDebuggerUrl"], timeout=60)
-        expression = (f"(async () => {{ const {{ parseStudyUid }} = await import('{origin}/js/dataset.js');\n"
-                      f"const cases = {json.dumps(cases)};\n{_JS_CASES}\nreturn out; }})()")
+        expression = f"(async () => {{ const ORIGIN = {json.dumps(origin)};\n{body}\n}})()"
         message = {}
         for attempt in range(1, 30):  # the page may still be loading: its first context can be replaced under us
             ws.send(json.dumps({"id": attempt, "method": "Runtime.evaluate",
@@ -198,6 +235,12 @@ def _run_chromium(chrome, cases, tmp_path):
         server.shutdown()
 
 
+def _run_chromium(chrome, cases, tmp_path):
+    body = (f"const {{ parseStudyUid }} = await import(ORIGIN + '/js/dataset.js');\n"
+            f"const cases = {json.dumps(cases)};\n{_JS_CASES}\nreturn out;")
+    return run_in_chromium(chrome, body, tmp_path)
+
+
 def test_the_walker_finds_the_top_level_study_uid(tmp_path):
     cases = _cases()
     payload = [{"name": name, "b64": base64.b64encode(data).decode(), "cut": cut}
@@ -210,4 +253,5 @@ def test_the_walker_finds_the_top_level_study_uid(tmp_path):
         results = _run_chromium(chrome, payload, tmp_path)
     else:
         pytest.skip("needs Node or a headless Chromium to run the JavaScript")
-    assert {name: results[name] for name in cases} == {name: expected for name, (_, _, expected) in cases.items()}
+    for name, (_, _, expected) in cases.items():  # the fields each case is about
+        assert {key: results[name][key] for key in expected} == expected, name

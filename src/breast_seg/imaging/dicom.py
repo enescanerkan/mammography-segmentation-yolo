@@ -36,8 +36,9 @@ TEXT_FIELDS = ("SeriesDescription", "ProtocolName", "StudyDescription",
 # Field names that count as header facts rather than guesses (the UI flags the rest).
 HEADER_SOURCES = frozenset({"ViewPosition", "ViewCodeSequence", "ImageLaterality", "Laterality", "FrameLaterality"})
 
-_NOT_IMAGES = ("txt", "json", "csv", "xml", "yaml", "yml", "md", "pdf", "log",
-               "png", "jpg", "jpeg", "tif", "tiff", "zip", "gz")
+_NOT_IMAGES = ("txt", "json", "csv", "xml", "yaml", "yml", "md", "pdf", "log", "zip", "gz")
+# Pictures: an image, but not one that can be measured (no pixel spacing, no view or side in a header).
+_PICTURES = ("png", "jpg", "jpeg", "tif", "tiff", "bmp", "gif", "webp")
 
 # "L-MLO", "l_mlo", "lcc" — but not the "cc" inside "accession".
 _VIEW_IN_TEXT = re.compile(r"(?<![a-z])(mlo|cc|ml|lm|xccl)(?![a-z])", re.I)
@@ -56,8 +57,20 @@ _SIDE_PATTERNS = (
 )
 
 
+# Why a file is not used, by code (the second argument of every DicomError). An interface that shows the reason in
+# another language translates by code; the English sentence is the message itself.
+ERROR_CODES = ("not_an_image", "raster_image", "not_dicom", "undecodable", "not_single_frame", "view_unknown",
+               "side_unknown", "view_unsupported")
+
+
 class DicomError(ValueError):
-    """Raised with a message meant to be shown to the user as-is."""
+    """Raised with a message meant to be shown to the user as-is; ``code`` (one of :data:`ERROR_CODES`) and
+    ``params`` (the file name and whatever else the sentence quotes) say the same thing for a translation."""
+
+    def __init__(self, message: str, code: str = "", **params: Any) -> None:
+        super().__init__(message)
+        self.code = code
+        self.params = params
 
 
 def _apply_voi_lut(array: np.ndarray, dataset: Any) -> np.ndarray:
@@ -89,21 +102,27 @@ def read_dicom(data: bytes, filename: str) -> Tuple[np.ndarray, Dict[str, Any]]:
     # it pick up a labels/ sidecar.
     suffix = filename.rsplit(".", 1)[-1].lower() if "." in filename.rsplit("/", 1)[-1] else ""
     if suffix in _NOT_IMAGES:
-        raise DicomError(f"{filename}: skipped — a .{suffix} file, not an image")
+        raise DicomError(f"{filename}: skipped — a .{suffix} file, not an image", "not_an_image",
+                         file=filename, suffix=suffix)
+    if suffix in _PICTURES:
+        raise DicomError(f"{filename}: skipped — this application reads DICOM (.dcm) only; PNG/JPG files have no "
+                         "pixel spacing or view information, so mm cannot be measured.", "raster_image", file=filename)
 
     try:
         dataset = pydicom.dcmread(io.BytesIO(data))
     except Exception as exc:  # noqa: BLE001 - any parser failure is a user-facing "not DICOM"
-        raise DicomError(f"{filename}: not readable as DICOM ({exc})") from None
+        raise DicomError(f"{filename}: not readable as DICOM ({exc})", "not_dicom",
+                         file=filename, why=str(exc)) from None
 
     try:
         pixels = _apply_voi_lut(dataset.pixel_array, dataset).astype(np.float32)
     except Exception as exc:  # noqa: BLE001
         raise DicomError(
-            f"{filename}: pixel data could not be decoded — a compression codec may be missing ({exc})") from None
+            f"{filename}: pixel data could not be decoded — a compression codec may be missing ({exc})",
+            "undecodable", file=filename, why=str(exc)) from None
 
     if pixels.ndim != 2:
-        raise DicomError(f"{filename}: expected a single-frame grayscale image")
+        raise DicomError(f"{filename}: expected a single-frame grayscale image", "not_single_frame", file=filename)
 
     view, view_source = resolve_view(dataset, filename)
     laterality, laterality_source = resolve_laterality(dataset, filename)
@@ -112,11 +131,11 @@ def read_dicom(data: bytes, filename: str) -> Tuple[np.ndarray, Dict[str, Any]]:
         raise DicomError(
             f"{filename}: could not tell CC from MLO. The header has no ViewPosition, "
             "ViewCodeSequence or series description naming the view — rename the file "
-            "so it contains the view, e.g. L-MLO.dcm or R_CC.dcm.")
+            "so it contains the view, e.g. L-MLO.dcm or R_CC.dcm.", "view_unknown", file=filename)
     if laterality is None:
         raise DicomError(
             f"{filename}: could not tell left from right. The header has no ImageLaterality or "
-            "Laterality — rename the file so it contains the side, e.g. L-MLO.dcm.")
+            "Laterality — rename the file so it contains the side, e.g. L-MLO.dcm.", "side_unknown", file=filename)
 
     spacing = getattr(dataset, "ImagerPixelSpacing", None) or getattr(dataset, "PixelSpacing", None)
     meta: Dict[str, Any] = {
@@ -185,7 +204,8 @@ def resolve_view(dataset: Any, filename: str) -> Tuple[Optional[str], str]:
         return raw, "ViewPosition"
     if raw in ("ML", "LM", "XCCL", "LMO"):
         # A true lateral is not an MLO; treating it as one would silently measure the wrong projection.
-        raise DicomError(f"{filename}: ViewPosition '{raw}' — only MLO and CC are supported")
+        raise DicomError(f"{filename}: ViewPosition '{raw}' — only MLO and CC are supported", "view_unsupported",
+                         file=filename, view=raw)
 
     coded = _view_from_code(dataset)
     if coded:

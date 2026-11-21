@@ -52,6 +52,8 @@ models:
     # The nipple is the class the segmentation model under-scores: at conf 0.25 it is missed on a noticeable
     # share of images, yet a second pass at 0.02 usually puts a candidate within a few millimetres of the pose
     # nipple. The low-confidence candidate is taken only when the independent landmark model vouches for it.
+    # (The review app adds two steps of its own after these, switched in its config, not here: the brightened
+    # re-search and the contour estimate. See the nipple: section of configs/app.example.yaml.)
     nipple_rescue:
       enabled: true
       conf: 0.02

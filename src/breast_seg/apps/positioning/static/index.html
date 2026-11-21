@@ -1,11 +1,12 @@
 <!doctype html>
-<html lang="en" data-bs-theme="light">
+<html lang="en" data-bs-theme="dark">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Mammography Positioning Review</title>
 <link rel="icon" type="image/svg+xml" href="/static/assets/icon.svg">
 <script>
+  // Dark unless the reader chose light (the theme button remembers the choice).
   try { const t = localStorage.getItem("breastseg.theme"); if (t === "dark" || t === "light") document.documentElement.dataset.bsTheme = t; } catch (_) {}
 </script>
 <link rel="stylesheet" href="/static/vendor/tabler/tabler.min.css">
@@ -92,7 +93,7 @@
             <span class="form-check-label" data-i18n="crop">Crop to tissue</span>
           </label>
           <label class="form-check form-switch check-row">
-            <input class="form-check-input" type="checkbox" id="sync-toggle" checked>
+            <input class="form-check-input" type="checkbox" id="sync-toggle">
             <span class="form-check-label" data-i18n="sync">Synchronise zoom &amp; pan</span>
           </label>
         </div>
@@ -175,6 +176,7 @@
   <button type="button" class="btn btn-sm dataset-btn" id="dataset-next" data-i18n-title="ds_next_title"><span id="dataset-next-label">Next</span> <span id="dataset-next-mark">›</span></button>
   <span class="dataset-state" id="dataset-state"></span>
   <span class="dataset-skipped" id="dataset-skipped"></span>
+  <span class="dataset-legend" id="dataset-legend"></span>
   <span class="dataset-keys" data-i18n="ds_keys">PageDown next · PageUp previous</span>
   <button type="button" class="step dataset-close" id="dataset-close" data-i18n-title="ds_close" data-i18n-aria="ds_close">✕</button>
 </div>
@@ -252,7 +254,7 @@
             <h3 class="card-title" data-i18n="recent">Recent studies</h3>
             <div class="card-actions recent-actions">
               <button type="button" class="link-btn" id="refresh-history" data-i18n="refresh">refresh</button>
-              <button type="button" class="link-btn danger" id="clear-history" data-i18n="clear">clear</button>
+              <button type="button" class="link-btn danger" id="clear-history" data-i18n="clear" data-i18n-title="clear_title">clear</button>
             </div>
           </div>
           <ul class="history" id="history">
@@ -380,6 +382,10 @@
       <span class="dirty-dot" id="editor-dirty" hidden data-i18n-title="unsaved"></span>
     </div>
     <div class="editor-actions">
+      <button type="button" class="btn btn-sm btn-ghost-clinical" id="editor-hide" aria-pressed="false"
+              data-i18n="ed_hide" data-i18n-title="ed_hide_title">Hide contours</button>
+      <button type="button" class="btn btn-sm btn-ghost-clinical" id="editor-clean"
+              data-i18n="ed_clean" data-i18n-title="ed_clean_title">Smooth / clean labels</button>
       <button type="button" class="btn btn-sm btn-ghost-clinical" id="editor-undo" data-i18n="undo">Undo</button>
       <button type="button" class="btn btn-sm btn-ghost-clinical" id="editor-reset" data-i18n="revert">Revert view</button>
       <button type="button" class="btn btn-sm btn-accent" id="editor-save" data-i18n="save">Save &amp; recompute</button>
@@ -415,9 +421,10 @@
           <dt data-i18n="key_alt_click">Alt+click</dt><dd data-i18n="k_delete_vertex">Delete a vertex</dd>
           <dt data-i18n="key_shift_click">Shift+click</dt><dd data-i18n="k_insert">Insert a vertex</dd>
           <dt>Ctrl+Z</dt><dd data-i18n="k_undo">Undo</dd>
+          <dt data-i18n="key_h">H</dt><dd data-i18n="k_hide">Hide / show contours</dd>
           <dt data-i18n="key_dblclick">Double-click</dt><dd data-i18n="k_fit">Fit to view</dd>
           <dt data-i18n="key_scroll">Scroll</dt><dd data-i18n="k_zoom">Zoom</dd>
-          <dt data-i18n="key_middle">Middle-drag</dt><dd data-i18n="k_pan">Pan</dd>
+          <dt data-i18n="key_pan_drag">Right- or middle-drag</dt><dd data-i18n="k_pan">Pan</dd>
         </dl>
       </section>
     </aside>

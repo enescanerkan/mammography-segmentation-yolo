@@ -32,7 +32,7 @@ from typing import Any, Dict, List, Optional
 import yaml
 
 APP_NAME = "MammographyPositioning"
-PREFERRED_PORT = 8765  # fixed when free, so the web view keeps its stored theme and language between runs
+PREFERRED_PORT = 8765  # fixed when free, so the web view keeps its stored theme and view settings between runs
 log = logging.getLogger("breast_seg.desktop")
 
 
@@ -275,7 +275,7 @@ def self_test(server: LocalServer, timeout: float) -> Dict[str, Any]:
     if plain.shape != compressed.shape or float(abs(plain - compressed).max()) > 0:
         raise RuntimeError("JPEG 2000 decoding differs from the plain pixels")
     result = engine.analyse(plain, meta)
-    missing = {"landmarks", "masks", "polygons", "display", "quality"} - set(result)
+    missing = {"landmarks", "masks", "polygons", "display"} - set(result)
     if missing:
         raise RuntimeError(f"analysis result lacks {sorted(missing)}")
     report["analysis_s"] = round(time.time() - started, 2)

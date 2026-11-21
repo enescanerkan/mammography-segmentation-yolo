@@ -5,7 +5,7 @@
 // thickness on screen at any zoom instead of turning into slabs.
 
 import { appearance, withAlpha } from './appearance.js';
-import { t } from './i18n.js';
+import { formatMm, t } from './i18n.js';
 
 export const FRAME = 640;
 
@@ -89,21 +89,69 @@ function drawPoints(ctx, image, unit) {
   }
 }
 
+/** What the MLO quality of this view was judged from (640 frame), when it was graded. */
+function qualityBasis(image) {
+  const item = (image.criteria || []).find((entry) => entry.id === 'mlo_quality');
+  return item && item.basis ? item.basis : null;
+}
+
+/** The fitted pectoral line, dashed. */
+function drawPectoralLine(ctx, line, color, unit) {
+  ctx.beginPath();
+  ctx.moveTo(line[0][0], line[0][1]);
+  ctx.lineTo(line[1][0], line[1][1]);
+  ctx.strokeStyle = withAlpha(color, 0.75);
+  ctx.lineWidth = 1.8 * unit;
+  ctx.setLineDash([7 * unit, 5 * unit]);
+  ctx.stroke();
+  ctx.setLineDash([]);
+}
+
+/**
+ * The pectoral line and the perpendicular from the nipple the MLO quality used. Dashed and without a millimetre
+ * label: it shows what the verdict rests on, it is not a measured distance.
+ */
+function drawBasis(ctx, basis, color, unit) {
+  drawPectoralLine(ctx, basis.line, color, unit);
+  ctx.strokeStyle = withAlpha(color, 0.75);
+  ctx.beginPath();
+  ctx.moveTo(basis.nipple[0], basis.nipple[1]);
+  ctx.lineTo(basis.foot[0], basis.foot[1]);
+  ctx.lineWidth = 1.6 * unit;
+  ctx.setLineDash([3 * unit, 4 * unit]);
+  ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.beginPath();
+  ctx.arc(basis.nipple[0], basis.nipple[1], 3 * unit, 0, Math.PI * 2);
+  ctx.fillStyle = color;
+  ctx.fill();
+}
+
 function drawMeasure(ctx, image, layer, unit) {
   const measure = image.measures && image.measures[layer.route];
-  if (!measure || !measure.ok) return;
   const color = layerColor(layer);
+  if (!measure || !measure.ok) {
+    // The MLO quality is judged from the line the segmentation route fitted, so it is drawn with that route. (When
+    // the route measured, the quality used the very nipple and line of the distance drawn below.)
+    const basis = layer.route === 'mask' ? qualityBasis(image) : null;
+    // No distance was measured (no nipple mask), yet the MLO quality was graded from the pectoral line and the
+    // nipple it fell back to: draw those, so the reviewer sees what the verdict is based on. With no nipple at all
+    // only the pectoral angle was read off the line, and the line alone is drawn.
+    if (basis) drawBasis(ctx, basis, color, unit);
+    else if (measure && measure.line) drawPectoralLine(ctx, measure.line, color, unit);
+    return;
+  }
 
   // The pectoral line the perpendicular is dropped onto, when the route has one.
-  if (measure.line) {
-    ctx.beginPath();
-    ctx.moveTo(measure.line[0][0], measure.line[0][1]);
-    ctx.lineTo(measure.line[1][0], measure.line[1][1]);
-    ctx.strokeStyle = withAlpha(color, 0.75);
-    ctx.lineWidth = 1.8 * unit;
-    ctx.setLineDash([7 * unit, 5 * unit]);
-    ctx.stroke();
-    ctx.setLineDash([]);
+  if (measure.line) drawPectoralLine(ctx, measure.line, color, unit);
+
+  // Measured without a nipple (the contour fallback): the distance is dashed and starts at an open ring on the
+  // tissue contour, and its label says it is an estimate. The MLO quality still judged the nipple it fell back to
+  // (the pose point); that perpendicular is drawn as well when it starts elsewhere.
+  const estimated = Boolean(measure.estimated);
+  const basis = estimated && layer.route === 'mask' ? qualityBasis(image) : null;
+  if (basis && (basis.nipple[0] !== measure.from[0] || basis.nipple[1] !== measure.from[1])) {
+    drawBasis(ctx, basis, color, unit);
   }
 
   const [x1, y1] = measure.from;
@@ -113,16 +161,25 @@ function drawMeasure(ctx, image, layer, unit) {
   ctx.lineTo(x2, y2);
   ctx.strokeStyle = color;
   ctx.lineWidth = 2.2 * unit;
+  if (estimated) ctx.setLineDash([8 * unit, 4 * unit]);
   ctx.stroke();
+  ctx.setLineDash([]);
 
-  for (const [x, y] of [[x1, y1], [x2, y2]]) {
+  [[x1, y1], [x2, y2]].forEach(([x, y], index) => {
     ctx.beginPath();
+    if (estimated && index === 0) {
+      ctx.arc(x, y, 4.5 * unit, 0, Math.PI * 2);
+      ctx.lineWidth = 1.8 * unit;
+      ctx.stroke();
+      return;
+    }
     ctx.arc(x, y, 3 * unit, 0, Math.PI * 2);
     ctx.fillStyle = color;
     ctx.fill();
-  }
+  });
 
-  label(ctx, `${measure.mm.toFixed(1)} mm`, (x1 + x2) / 2 + 8 * unit, (y1 + y2) / 2 - 8 * unit, color, unit);
+  const text = estimated ? `${formatMm(measure.mm)} ${t('est_short')}` : formatMm(measure.mm);
+  label(ctx, text, (x1 + x2) / 2 + 8 * unit, (y1 + y2) / 2 - 8 * unit, color, unit);
 }
 
 export function label(ctx, text, x, y, color, unit) {

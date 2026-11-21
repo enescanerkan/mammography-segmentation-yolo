@@ -34,6 +34,11 @@ def test_committed_registry_parses(monkeypatch, tmp_path):
     seg = registry.get("seg_v4")
     assert seg.classes == ("pectoral", "breast-tissue", "nipple") and seg.nipple_rescue.enabled
     assert seg.nipple_rescue == NippleRescue(enabled=True, conf=0.02, max_mm=15.0)
+    # the review app's own nipple steps (brightened re-search, contour estimate) are switched in its config: the
+    # shared registry cannot turn them on for every other user of the engine
+    for key in ("brighten", "window_mm", "max_gap_mm", "contour"):
+        with pytest.raises(RegistryError, match="unknown keys"):
+            NippleRescue.from_dict({"enabled": True, key: True})
     assert (seg.conf, seg.iou) == (0.25, 0.5)
 
 

@@ -16,18 +16,31 @@ from .criteria import CRITERIA_VERSION, CriteriaGrader
 
 FRAME = 640
 
+# The review grid's order: the right breast on the reader's left, MLO above CC. The report, the recent list and the
+# page (main.js VIEW_ORDER, kept equal by a test) list views in it rather than in upload order.
+VIEW_ORDER = ("R-MLO", "L-MLO", "R-CC", "L-CC")
+
+
+def view_rank(view_key: Any) -> int:
+    """Where a view goes in :data:`VIEW_ORDER` (anything else after it)."""
+    return VIEW_ORDER.index(view_key) if view_key in VIEW_ORDER else len(VIEW_ORDER)
+
 
 class PositioningAssessor:
     """Builds image entries and (re)computes measurements, criteria and verdicts of a study record.
 
     Args:
         rules: default delta-D thresholds (a record keeps its own once created).
-        grader: criterion grader; defaults to the built-in bands.
+        grader: criterion grader.
+        contour_fallback: measure the segmentation route at the farthest breast-tissue contour point when a view
+            has no nipple contour (:func:`measures.measure_mask`); such a measurement is marked estimated.
     """
 
-    def __init__(self, rules: Optional[Rules] = None, grader: Optional[CriteriaGrader] = None) -> None:
+    def __init__(self, rules: Optional[Rules] = None, grader: Optional[CriteriaGrader] = None,
+                 contour_fallback: bool = False) -> None:
         self.rules = rules or Rules()
         self.grader = grader or CriteriaGrader()
+        self.contour_fallback = bool(contour_fallback)
 
     def build_image(self, view_key: str, meta: Mapping[str, Any], analysis: Mapping[str, Any]) -> Dict[str, Any]:
         """One view's entry from the DICOM summary and :meth:`LandmarkEngine.analyse` output (measured)."""
@@ -45,7 +58,6 @@ class PositioningAssessor:
             "landmarks": analysis["landmarks"],
             "polygons": analysis["polygons"],
             "lesions": analysis["lesions"],
-            "quality": analysis["quality"],
             "physics": meta.get("physics") or {},
             "transform": analysis.get("transform"),  # 640 frame -> original pixels (the MLO-alone verdict needs it)
         }
@@ -57,7 +69,7 @@ class PositioningAssessor:
         image["masks"] = masks
         image["measures"] = {
             "landmark": measures.measure_landmark(image),
-            "mask": measures.measure_mask(image),
+            "mask": measures.measure_mask(image, self.contour_fallback),
         }
         image["criteria"] = self.grader.for_image(image, masks)
         image.pop("masks", None)
@@ -77,10 +89,7 @@ class PositioningAssessor:
         for image in record["images"]:
             self.remeasure(image)
         record["summary"] = measures.summarise(record["images"], rules["threshold_mm"], rules["severe_mm"])
-        study_items = self.grader.for_study(record["images"])
-        every = [entry for image in record["images"] for entry in image.get("criteria", [])] + study_items
-        record["criteria"] = {"study": study_items, "summary": self.grader.summarise(every),
-                              "version": CRITERIA_VERSION}
+        record["criteria"] = self._criteria_block(record)
         record["rules"] = rules
         return record
 
@@ -88,16 +97,21 @@ class PositioningAssessor:
         """Recompute the criteria only, from the labels and measurements the record already holds (in place).
 
         For records saved under an older criteria set: the ΔD measurements, the verdicts and the rules are left
-        exactly as stored — only the criteria lists, the study items and their counts are rebuilt.
+        exactly as stored — only the criteria lists and their counts are rebuilt, and the summary's millimetres,
+        once stored rounded to two decimals, are restored from the per-view measurements they were computed from
+        (:func:`measures.restore_precision`), so the card and the image show the same number.
         """
         for image in record["images"]:
             masks = measures.masks_from_polygons(image.get("polygons") or {}, FRAME)
             image["criteria"] = self.grader.for_image(image, masks)
-        study_items = self.grader.for_study(record["images"])
-        every = [entry for image in record["images"] for entry in image.get("criteria", [])] + study_items
-        record["criteria"] = {"study": study_items, "summary": self.grader.summarise(every),
-                              "version": CRITERIA_VERSION}
+        record["criteria"] = self._criteria_block(record)
+        if isinstance(record.get("summary"), dict):
+            measures.restore_precision(record["summary"], record["images"])
         return record
+
+    def _criteria_block(self, record: Mapping[str, Any]) -> Dict[str, Any]:
+        every = [entry for image in record["images"] for entry in image.get("criteria", [])]
+        return {"summary": self.grader.summarise(every), "version": CRITERIA_VERSION}
 
     def new_record(self, study_id: str, images: List[Dict[str, Any]], problems: List[str],
                    models: Mapping[str, str], preview_size: int, created: Optional[float] = None) -> Dict[str, Any]:

@@ -43,24 +43,40 @@ const EN = {
   ds_option: '{i} / {n} · {name}', ds_scanning: 'Reading the study headers… {d} / {n} files',
   ds_analysing: 'Study {i} / {n} — analysing…', ds_working: 'opening study {i}…', ds_last: 'last study',
   ds_done: 'finished · {o} / {n} opened', ds_state_failed: 'could not be analysed', ds_state_removed: 'removed',
-  ds_skipped: '{n} files skipped (not DICOM)',
+  ds_skipped: '{n} files skipped (not DICOM images)',
+  ds_left_out: 'This study has {n} files but the server takes {limit} per study; not sent: {left}. Files whose path names a view (MLO, CC) are sent first.',
+  ds_left_short: '{left} of {n} files of this study not sent',
+  ds_unreadable: 'The folder could not be read: {msg}',
   ds_empty: 'No DICOM study was found in this folder.',
   ds_failed: 'Study {i} ({name}) could not be analysed: {msg}',
   ds_finished_all: 'Dataset finished: all {n} studies were opened.',
-  ds_finished_counts: 'Dataset finished: {o} of {n} studies opened, {f} failed, {u} not opened.',
+  ds_finished_counts: 'Dataset finished ({n} studies): {parts}.',
+  ds_part_opened: '{c} opened ✓', ds_part_analysed: '{c} analysed but not opened •',
+  ds_part_failed: '{c} could not be analysed ✕', ds_part_removed: '{c} removed –', ds_part_unseen: '{c} not reached',
+  ds_mark_title: '✓ opened · • on the server, not opened in this session · ✕ could not be analysed · – removed',
+  ds_legend: '✓ opened · • analysed, not opened yet · ✕ could not be analysed · – removed',
   busy_wait: 'Still working on the previous step — try again in a moment.',
   tree_summary: 'Accepted folder layout',
   tree_note: 'The folder name carries the view, so the files inside can be named anything. Loose DICOM files work as well.',
   how_title: 'How it works',
   step1: 'Upload', step1_d: 'MLO and CC of both breasts; view and side are read from the DICOM header, or from the folder name.',
-  step2: 'Review', step2_d: 'ΔD per breast from the landmarks and from the segmentation, side by side, with the pectoral angle and the MLO criteria.',
+  step2: 'Review', step2_d: 'ΔD per breast from the landmarks and from the segmentation, side by side, with the MLO quality and the pectoral angle.',
   step3: 'Correct', step3_d: 'Edit any contour or point; every measurement and the report follow.',
   recent: 'Recent studies', refresh: 'refresh', clear: 'clear', no_recent: 'No stored studies yet.',
   st_upload: 'Uploading', st_analyse: 'Reading DICOM, placing landmarks, segmenting', st_render: 'Preparing the views',
   files_n: '{n} files', file_1: '1 file',
   disclaimer: 'Research prototype — not a medical device; every result must be checked by a reader.',
-  empty_files: 'The selected files are empty.',
-  clear_confirm: 'Delete every stored study, with its previews and labels? This cannot be undone.',
+  empty_files: 'The selected files are empty (0 bytes): {files}.',
+  empty_file_1: 'The selected file is empty (0 bytes): {files}.',
+  empty_skipped: 'Empty files (0 bytes) were not sent: {files}.',
+  only_dicom: 'This application reads DICOM (.dcm) only; PNG/JPG files have no pixel spacing or view information, so mm cannot be measured. Not used: {names}.',
+  no_dicom_files: 'None of the selected files can be a DICOM image ({n} skipped: hidden files, text, pictures or archives).',
+  more_files: '+{n} more',
+  clear_arm: 'delete all {n}?', clear_title: 'Delete every study stored on the server',
+  clear_confirm: 'All {n} stored studies will be deleted from the server, with their previews and labels. This cannot be undone. Click “delete all {n}?” again to confirm; otherwise nothing happens.',
+  clear_unopened: '({k} of them were analysed ahead in a dataset and not opened yet, so they are not in the list.)',
+  no_recent_opened: 'No study has been opened yet ({k} analysed ahead in a dataset, waiting to be opened).',
+  clear_nothing: 'No study is stored on the server.',
   deleted_1: '1 study deleted.', deleted_n: '{n} studies deleted.',
   opening: 'Opening study…', loading_views: 'Loading the views…',
 
@@ -86,6 +102,14 @@ const EN = {
   badge_mirrored: 'mirrored', badge_mirrored_title: 'The model only detected anything on the mirrored image',
   badge_rescued: 'nipple rescued',
   badge_rescued_title: 'Segmentation found the nipple at low confidence; the pose model vouched for it',
+  badge_brightened: 'nipple found after brightening',
+  badge_brightened_title: 'Not found on the image as stored; found after brightening the front of the breast. Check its position.',
+  badge_estimated: 'nipple estimated (contour)',
+  badge_estimated_title: 'Nipple not found: the segmentation measurement is taken at the breast-tissue contour point farthest from the pectoral line (MLO) or the chest wall (CC). It enters the verdict as an estimate.',
+  est_short: 'est.', est_title: 'estimated — nipple not found (contour point)',
+  card_estimated: 'Estimated — nipple not found on {views}; measured at the farthest breast-tissue contour point.',
+  notice_estimated_MLO: '{view}: nipple not found — the segmentation PNL is estimated at the breast-tissue contour point farthest from the pectoral line.',
+  notice_estimated_CC: '{view}: nipple not found — the segmentation distance is estimated at the breast-tissue contour point farthest from the chest wall.',
 
   right_breast: 'Right breast', left_breast: 'Left breast', no_views: 'no views',
   nothing_uploaded: 'Nothing uploaded for this breast.',
@@ -97,13 +121,11 @@ const EN = {
   cmp_partial: 'Only one method produced a result.', cmp_none: 'Neither method produced a result.',
 
   criteria_title: 'Positioning criteria',
-  criteria_counts: '{g} good · {a} acceptable · {p} poor',
+  criteria_counts: '{g} good · {a} acceptable · {p} poor', criteria_counts_gp: '{g} good · {p} poor',
   criteria_empty: 'No criteria for this study yet — they are computed from the segmentation masks, so a view without them has no usable contours.',
-  grade_good: 'Good', grade_acceptable: 'Acceptable', grade_poor: 'Poor', grade_na: 'n/a', grade_info: 'information',
-  mlo_alone_label: 'MLO alone', mlo_alone_adequate: 'adequate', mlo_alone_inadequate: 'inadequate',
-  both_breasts: 'Both breasts', est: 'est', est_title: 'Estimated — shown, never graded',
+  grade_good: 'good', grade_acceptable: 'acceptable', grade_poor: 'poor', grade_na: 'n/a', grade_info: 'information',
+  mlo_quality_label: 'MLO quality', mlo_quality_good: 'good', mlo_quality_poor: 'poor',
   notes: 'Notes',
-  notice_flagged: 'The two methods disagree — this study needs a review.',
   notice_spacing: 'Pixel spacing is missing from the header ({views}) — millimetre values assume 0.085 mm and are estimates.',
   download_labels: 'Download labels', delete_study: 'Delete study',
   delete_confirm: 'This study and its previews will be permanently deleted. Continue?',
@@ -121,7 +143,19 @@ const EN = {
   k_undo: 'Undo',
   k_fit: 'Fit to view', k_zoom: 'Zoom', k_pan: 'Pan',
   key_alt_click: 'Alt+click', key_shift_click: 'Shift+click', key_dblclick: 'Double-click', key_scroll: 'Scroll',
-  key_middle: 'Middle-drag',
+  key_middle: 'Middle-drag', key_pan_drag: 'Right- or middle-drag', key_h: 'H',
+  k_hide: 'Hide / show contours',
+  ed_hide: 'Hide contours', ed_show: 'Show contours',
+  ed_hide_title: 'Hide the breast, pectoral and nipple contours to see the image under them (H). Only the view changes; the labels stay as they are.',
+  hint_hidden: 'Contours are hidden (H shows them again): only the landmark points can be edited meanwhile.',
+  st_hidden: 'hidden',
+  ed_clean: 'Smooth / clean labels',
+  ed_clean_title: 'Apply the cleaning rules to this view: each structure keeps its largest region, holes are filled, stray pixels go to the nearest structure and the edges are smoothed. An unsaved edit — Undo takes it back.',
+  ed_cleaning: 'Cleaning…', ed_clean_none: 'Nothing to clean on this view: its contours already follow the rules.',
+  ed_clean_done: 'Cleaned: {classes}. Not saved yet — Undo takes it back.',
+  ed_clean_done_view: '{view} cleaned: {classes}. Not saved yet — Undo takes it back.',
+  ed_clean_none_view: 'Nothing to clean on {view}: its contours already follow the rules.',
+  ed_clean_stale: '{view} was edited while it was being cleaned, so the cleaning was not applied. Click again to clean it as it is now.',
   hint_select: 'Drag a handle to move it. Shift+click an edge inserts a vertex, Alt+click removes one.',
   hint_polygon: 'Click to place vertices. Enter, a double-click, or a click on the first point closes the shape and replaces the current one.',
   hint_point: 'Click to place the selected landmark. Alt+click removes it.',
@@ -133,10 +167,12 @@ const EN = {
   zoom_in: 'Zoom in', zoom_out: 'Zoom out', fit: 'Fit',
 
   lightbox_aria: 'Enlarged view', lightbox_hint: 'Drag to pan · Scroll to zoom · Esc to close',
-  views_n: '{n} views', flag_title: 'The methods disagree',
+  views_n: '{n} views', flag_title: 'The methods disagree on the verdict', flag_wide_title: 'Same verdict, but the measurements differ',
+  flag_partial_title: 'Only one method produced a result',
 
   err_timeout: 'The server did not respond in time. Is it still running?',
   err_network: 'Could not reach the server. Is the service running?',
+  err_file_unreadable: 'The browser could not read {file}; it may have been moved or changed.',
   err_invalid: 'Invalid request: {msg}', err_http: 'Request failed (HTTP {status}).',
 };
 
@@ -181,25 +217,41 @@ const TR = {
   ds_option: '{i} / {n} · {name}', ds_scanning: 'Çalışma başlıkları okunuyor… {d} / {n} dosya',
   ds_analysing: 'Çalışma {i} / {n} — analiz ediliyor…', ds_working: '{i}. çalışma açılıyor…', ds_last: 'son çalışma',
   ds_done: 'bitti · {o} / {n} açıldı', ds_state_failed: 'analiz edilemedi', ds_state_removed: 'silindi',
-  ds_skipped: '{n} dosya atlandı (DICOM değil)',
+  ds_skipped: '{n} dosya atlandı (DICOM görüntüsü değil)',
+  ds_left_out: 'Bu çalışmada {n} dosya var ama sunucu çalışma başına {limit} dosya alıyor; gönderilmeyen: {left}. Yolunda görünüm adı (MLO, CC) geçen dosyalar önce gönderilir.',
+  ds_left_short: 'bu çalışmanın {n} dosyasından {left} tanesi gönderilmedi',
+  ds_unreadable: 'Klasör okunamadı: {msg}',
   ds_empty: 'Bu klasörde DICOM çalışması bulunamadı.',
   ds_failed: 'Çalışma {i} ({name}) analiz edilemedi: {msg}',
   ds_finished_all: 'Veri seti bitti: {n} çalışmanın hepsi açıldı.',
-  ds_finished_counts: 'Veri seti bitti: {n} çalışmadan {o} açıldı, {f} analiz edilemedi, {u} açılmadı.',
+  ds_finished_counts: 'Veri seti bitti ({n} çalışma): {parts}.',
+  ds_part_opened: '{c} açıldı ✓', ds_part_analysed: '{c} analiz edildi ama açılmadı •',
+  ds_part_failed: '{c} analiz edilemedi ✕', ds_part_removed: '{c} silindi –', ds_part_unseen: '{c} sırası gelmedi',
+  ds_mark_title: '✓ açıldı · • sunucuda kayıtlı, bu oturumda açılmadı · ✕ analiz edilemedi · – silindi',
+  ds_legend: '✓ açıldı · • analiz edildi, henüz açılmadı · ✕ analiz edilemedi · – silindi',
   busy_wait: 'Önceki işlem sürüyor — biraz sonra yeniden deneyin.',
   tree_summary: 'Kabul edilen klasör düzeni',
   tree_note: 'Görünüm klasör adından okunur; içindeki dosyalar herhangi bir adla olabilir. Tek tek DICOM dosyaları da kabul edilir.',
   how_title: 'Nasıl çalışır',
   step1: 'Yükleyin', step1_d: 'İki memenin MLO ve CC görüntüleri; görünüm ve taraf DICOM başlığından ya da klasör adından okunur.',
-  step2: 'İnceleyin', step2_d: 'Her meme için nokta ve segmentasyon kaynaklı ΔD yan yana; pektoral açı ve MLO kriterleriyle birlikte.',
+  step2: 'İnceleyin', step2_d: 'Her meme için nokta ve segmentasyon kaynaklı ΔD yan yana; MLO kalitesi ve pektoral açıyla birlikte.',
   step3: 'Düzeltin', step3_d: 'Herhangi bir konturu ya da noktayı düzenleyin; tüm ölçümler ve rapor güncellenir.',
   recent: 'Son çalışmalar', refresh: 'yenile', clear: 'temizle', no_recent: 'Henüz saklanan çalışma yok.',
   st_upload: 'Yükleniyor', st_analyse: 'DICOM okunuyor, noktalar yerleştiriliyor, segmentasyon yapılıyor',
   st_render: 'Görüntüler hazırlanıyor',
   files_n: '{n} dosya', file_1: '1 dosya',
   disclaimer: 'Araştırma prototipi — tıbbi cihaz değildir; her sonuç bir okuyucu tarafından kontrol edilmelidir.',
-  empty_files: 'Seçilen dosyalar boş.',
-  clear_confirm: 'Saklanan tüm çalışmalar önizlemeleri ve etiketleriyle silinsin mi? Bu işlem geri alınamaz.',
+  empty_files: 'Seçilen dosyalar boş (0 bayt): {files}.',
+  empty_file_1: 'Seçilen dosya boş (0 bayt): {files}.',
+  empty_skipped: 'Boş dosyalar (0 bayt) gönderilmedi: {files}.',
+  only_dicom: 'Bu uygulama yalnız DICOM (.dcm) okur; PNG/JPG’de piksel aralığı ve görünüm bilgisi olmadığı için mm ölçülemez. Kullanılmayan: {names}.',
+  no_dicom_files: 'Seçilen dosyaların hiçbiri DICOM görüntüsü olamaz ({n} dosya atlandı: gizli dosya, metin, resim ya da arşiv).',
+  more_files: '+{n} dosya daha',
+  clear_arm: '{n} çalışma silinsin mi?', clear_title: 'Sunucuda saklanan bütün çalışmaları sil',
+  clear_confirm: '{n} çalışmanın tümü sunucudan silinecek (önizlemeleri ve etiketleriyle). Bu işlem geri alınamaz. Onaylamak için “{n} çalışma silinsin mi?” düğmesine bir kez daha tıklayın; tıklamazsanız hiçbir şey silinmez.',
+  clear_unopened: '(Bunların {k} tanesi bir veri setinde önden analiz edildi ve henüz açılmadı; bu yüzden listede görünmüyor.)',
+  no_recent_opened: 'Henüz açılan çalışma yok ({k} çalışma bir veri setinde önden analiz edildi, açılmayı bekliyor).',
+  clear_nothing: 'Sunucuda saklanan çalışma yok.',
   deleted_1: '1 çalışma silindi.', deleted_n: '{n} çalışma silindi.',
   opening: 'Çalışma açılıyor…', loading_views: 'Görüntüler yükleniyor…',
 
@@ -226,6 +278,14 @@ const TR = {
   badge_mirrored: 'aynalı', badge_mirrored_title: 'Model yalnız aynalanmış görüntüde bir şey buldu',
   badge_rescued: 'meme ucu kurtarıldı',
   badge_rescued_title: 'Segmentasyon meme ucunu düşük güvenle buldu; nokta modeli konumunu doğruladı',
+  badge_brightened: 'meme ucu parlatmayla bulundu',
+  badge_brightened_title: 'Görüntünün kendisinde bulunamadı; memenin ön ucu parlatılınca bulundu. Konumunu kontrol edin.',
+  badge_estimated: 'meme ucu tahmini (kontur)',
+  badge_estimated_title: 'Meme ucu bulunamadı: segmentasyon ölçümü meme dokusu konturunun pektoral çizgiye (MLO) ya da göğüs duvarına (CC) en uzak noktasından alındı. Karara tahmini değer olarak girer.',
+  est_short: 'tahmini', est_title: 'tahmini — meme ucu bulunamadı (kontur noktası)',
+  card_estimated: 'Tahmini — {views} görüntüsünde meme ucu bulunamadı; meme dokusu konturunun en uzak noktasından ölçüldü.',
+  notice_estimated_MLO: '{view}: meme ucu bulunamadı — segmentasyon PNL’si meme dokusu konturunun pektoral çizgiye en uzak noktasından tahmin edildi.',
+  notice_estimated_CC: '{view}: meme ucu bulunamadı — segmentasyon mesafesi meme dokusu konturunun göğüs duvarına en uzak noktasından tahmin edildi.',
 
   right_breast: 'Sağ meme', left_breast: 'Sol meme', no_views: 'görüntü yok',
   nothing_uploaded: 'Bu meme için görüntü yüklenmedi.',
@@ -237,13 +297,11 @@ const TR = {
   cmp_partial: 'Yalnız bir yöntem sonuç üretti.', cmp_none: 'İki yöntem de sonuç üretmedi.',
 
   criteria_title: 'Pozisyonlama kriterleri',
-  criteria_counts: '{g} iyi · {a} kabul edilebilir · {p} zayıf',
+  criteria_counts: '{g} iyi · {a} kabul edilebilir · {p} kötü', criteria_counts_gp: '{g} iyi · {p} kötü',
   criteria_empty: 'Bu çalışma için henüz kriter yok — kriterler segmentasyon maskelerinden hesaplanır; maskesi olmayan görüntüde kullanılabilir kontur yoktur.',
-  grade_good: 'İyi', grade_acceptable: 'Kabul edilebilir', grade_poor: 'Zayıf', grade_na: 'yok', grade_info: 'bilgi',
-  mlo_alone_label: 'MLO tek başına', mlo_alone_adequate: 'yeterli', mlo_alone_inadequate: 'yetersiz',
-  both_breasts: 'İki meme', est: 'tah', est_title: 'Tahmini — gösterilir, derecelendirilmez',
+  grade_good: 'iyi', grade_acceptable: 'kabul edilebilir', grade_poor: 'kötü', grade_na: 'ölçülemedi', grade_info: 'bilgi',
+  mlo_quality_label: 'MLO kalitesi', mlo_quality_good: 'iyi', mlo_quality_poor: 'kötü',
   notes: 'Notlar',
-  notice_flagged: 'İki yöntem ayrışıyor — bu çalışma gözden geçirilmeli.',
   notice_spacing: 'Başlıkta piksel aralığı yok ({views}) — milimetre değerleri 0,085 mm varsayar ve tahminidir.',
   download_labels: 'Etiketleri indir', delete_study: 'Çalışmayı sil',
   delete_confirm: 'Bu çalışma ve önizlemeleri kalıcı olarak silinecek. Devam edilsin mi?',
@@ -261,7 +319,19 @@ const TR = {
   k_undo: 'Geri al',
   k_fit: 'Sığdır', k_zoom: 'Yakınlaştır', k_pan: 'Kaydır',
   key_alt_click: 'Alt+tık', key_shift_click: 'Shift+tık', key_dblclick: 'Çift tık', key_scroll: 'Tekerlek',
-  key_middle: 'Orta tuşla sürükle',
+  key_middle: 'Orta tuşla sürükle', key_pan_drag: 'Sağ ya da orta tuşla sürükle', key_h: 'H',
+  k_hide: 'Konturları gizle / göster',
+  ed_hide: 'Konturları gizle', ed_show: 'Konturları göster',
+  ed_hide_title: 'Altındaki görüntüyü görmek için meme, pektoral ve meme ucu konturlarını gizleyin (H). Yalnız görünüm değişir; etiketler olduğu gibi kalır.',
+  hint_hidden: 'Konturlar gizli (H yeniden gösterir): bu sırada yalnız noktalar düzenlenebilir.',
+  st_hidden: 'gizli',
+  ed_clean: 'Etiketleri yumuşat / temizle',
+  ed_clean_title: 'Temizleme kurallarını bu görüntüye uygular: her yapının en büyük bölgesi kalır, delikler doldurulur, kopuk pikseller en yakın yapıya geçer ve kenarlar yumuşatılır. Kaydedilmemiş bir düzenlemedir; Geri al ile geri alınır.',
+  ed_cleaning: 'Temizleniyor…', ed_clean_none: 'Bu görüntüde temizlenecek bir şey yok: konturlar kurallara zaten uyuyor.',
+  ed_clean_done: 'Temizlendi: {classes}. Henüz kaydedilmedi; Geri al ile geri alınır.',
+  ed_clean_done_view: '{view} temizlendi: {classes}. Henüz kaydedilmedi; Geri al ile geri alınır.',
+  ed_clean_none_view: '{view} görüntüsünde temizlenecek bir şey yok: konturlar kurallara zaten uyuyor.',
+  ed_clean_stale: '{view} temizlenirken düzenlendi; bu yüzden temizleme uygulanmadı. Şimdiki haliyle temizlemek için yeniden tıklayın.',
   hint_select: 'Taşımak için bir tutamacı sürükleyin. Shift+tık kenara köşe ekler, Alt+tık köşeyi siler.',
   hint_polygon: 'Köşe eklemek için tıklayın. Enter, çift tık ya da ilk noktaya tık şekli kapatır ve mevcut şeklin yerine geçer.',
   hint_point: 'Seçili noktayı yerleştirmek için tıklayın. Alt+tık siler.',
@@ -273,10 +343,12 @@ const TR = {
   zoom_in: 'Yakınlaştır', zoom_out: 'Uzaklaştır', fit: 'Sığdır',
 
   lightbox_aria: 'Büyütülmüş görüntü', lightbox_hint: 'Kaydırmak için sürükleyin · Yakınlaştırmak için tekerlek · Kapatmak için Esc',
-  views_n: '{n} görüntü', flag_title: 'Yöntemler ayrışıyor',
+  views_n: '{n} görüntü', flag_title: 'Yöntemler kararda ayrışıyor', flag_wide_title: 'Karar aynı, ancak ölçümler ayrışıyor',
+  flag_partial_title: 'Yalnız bir yöntem sonuç üretti',
 
   err_timeout: 'Sunucu zamanında yanıt vermedi. Hâlâ çalışıyor mu?',
   err_network: 'Sunucuya ulaşılamadı. Servis çalışıyor mu?',
+  err_file_unreadable: 'Tarayıcı şu dosyayı okuyamadı: {file}. Dosya taşınmış ya da değişmiş olabilir.',
   err_invalid: 'Geçersiz istek: {msg}', err_http: 'İstek başarısız (HTTP {status}).',
 };
 
@@ -284,33 +356,57 @@ const TR = {
 // server's own text, so only the translations are listed.
 const CRITERIA_TR = {
   pectoral_angle: 'Pektoral açı',
-  pectoral_depth: 'Pektoral meme ucu seviyesine iniyor',
   nipple_centred: 'Meme ucu ortalanmış',
-  mlo_alone: 'MLO tek başına',
+  mlo_quality: 'MLO kalitesi',
   gantry: 'C-kol açısı',
 };
 
-// The server's detail texts (criteria.py), each a pattern whose numbers carry over into the translation. A detail
-// with no pattern here is shown as the server wrote it.
-const DETAILS_TR = [
-  [/^angle of the fitted pectoral line from the vertical$/, () => 'oturtulan pektoral çizginin dikeyle açısı'],
-  [/^positive = pectoral extends below the nipple$/, () => 'pozitif = pektoral meme ucunun altına uzanıyor'],
-  [/^distance from the middle of the breast's height \((\d+)% of the half-height\)$/,
-    (share) => `meme yüksekliğinin ortasına uzaklık (yarı yüksekliğe oranı: %${share})`],
-  [/^from the DICOM header$/, () => 'DICOM başlığından'],
-  [/^the posterior nipple line meets the pectoral line inside the image$/,
-    () => 'PNL pektoral çizgiyle görüntünün içinde kesişiyor'],
-  [/^the posterior nipple line meets the pectoral line outside the image, ([\d.]+) mm beyond the edge$/,
-    (mm) => `PNL pektoral çizgiyle görüntünün dışında kesişiyor, kenarın ${mm.replace('.', ',')} mm ötesinde`],
-  [/^the posterior nipple line meets the pectoral line outside the image$/,
-    () => 'PNL pektoral çizgiyle görüntünün dışında kesişiyor'],
-  [/^needs the pectoral line and the nipple$/, () => 'pektoral çizgi ve meme ucu gerekli'],
-  [/^no image geometry stored for this study$/, () => 'bu çalışma için görüntü geometrisi kayıtlı değil'],
-  [/^no pectoral line$/, () => 'pektoral çizgisi yok'],
-  [/^needs the pectoral and the nipple$/, () => 'pektoral ve meme ucu gerekli'],
-  [/^needs the nipple and the breast$/, () => 'meme ucu ve meme dokusu gerekli'],
-  [/^no breast tissue$/, () => 'meme dokusu yok'],
-];
+// The server's explanations of a criterion, by the code it sends with each one (criteria.py DETAILS); the numbers come
+// as parameters. English is the server's own sentence. tests/test_positioning.py checks that every code is here.
+const DETAILS_TR = {
+  pectoral_angle: 'oturtulan pektoral çizginin dikeyle açısı',
+  no_pectoral_line: 'pektoral çizgisi yok',
+  mlo_inside: 'PNL pektoral çizgiyle görüntünün içinde kesişiyor',
+  mlo_outside: 'PNL pektoral çizgiyle görüntünün dışında kesişiyor',
+  mlo_outside_by: 'PNL pektoral çizgiyle görüntünün dışında kesişiyor, kenarın {mm} mm ötesinde',
+  needs_line_and_nipple: 'pektoral çizgi ve meme ucu gerekli',
+  no_geometry: 'bu çalışma için görüntü geometrisi kayıtlı değil',
+  nipple_centred: 'meme yüksekliğinin ortasına uzaklık (yarı yüksekliğe oranı: %{share})',
+  needs_nipple_and_breast: 'meme ucu ve meme dokusu gerekli',
+  no_breast_tissue: 'meme dokusu yok',
+  from_header: 'DICOM başlığından',
+};
+
+// The server's refusals, by the code it sends with each one (service.py ERRORS); numbers and names come as
+// parameters. English is the server's own sentence. tests/test_positioning_app.py checks that every code is here.
+const ERRORS_TR = {
+  study_not_found: 'Çalışma bulunamadı.',
+  image_not_found: 'Görüntü bulunamadı.',
+  models_loading: 'Modeller hâlâ yükleniyor — biraz sonra yeniden deneyin.',
+  models_missing: 'Modeller yüklü değil — uygulamanın sorumlusuna haber verin.',
+  no_files: 'Dosya gönderilmedi.',
+  too_many_files: 'Bir seferde en çok {limit} dosya yüklenebilir.',
+  nothing_processed: 'Hiçbir görüntü işlenemedi.',
+  only_dicom: 'Bu uygulama yalnız DICOM (.dcm) okur; PNG/JPG’de piksel aralığı ve görünüm bilgisi olmadığı için mm ölçülemez. Kullanılmayan: {names}.',
+  clear_changed: 'Şu anda {stored} çalışma saklanıyor, {expected} değil; hiçbir şey silinmedi. Listeyi yenileyip yeniden deneyin.',
+};
+
+// Why one file of an upload was not used (service.py PROBLEMS); listed under "nothing_processed", and kept with a
+// stored study as its upload notes (`problem_codes`, see uploadNote).
+const PROBLEMS_TR = {
+  not_an_image: '{file}: atlandı — .{suffix} dosyası, görüntü değil',
+  raster_image: '{file}: atlandı — bu uygulama yalnız DICOM (.dcm) okur; PNG/JPG’de piksel aralığı ve görünüm bilgisi olmadığı için mm ölçülemez.',
+  not_dicom: '{file}: DICOM olarak okunamadı ({why})',
+  undecodable: '{file}: piksel verisi çözülemedi — bir sıkıştırma çözücüsü eksik olabilir ({why})',
+  not_single_frame: '{file}: tek kareli, gri tonlu bir görüntü bekleniyordu',
+  view_unknown: '{file}: CC mi MLO mu anlaşılamadı. Başlıkta görünümü bildiren ViewPosition, ViewCodeSequence ya da seri açıklaması yok — dosyanın adına görünümü yazın, ör. L-MLO.dcm ya da R_CC.dcm.',
+  side_unknown: '{file}: sol mu sağ mı anlaşılamadı. Başlıkta ImageLaterality ya da Laterality yok — dosyanın adına tarafı yazın, ör. L-MLO.dcm.',
+  view_unsupported: '{file}: ViewPosition “{view}” — yalnız MLO ve CC desteklenir',
+  file_too_large: '{file}: dosya çok büyük',
+  duplicate_view: '{file}: {view} zaten {first} olarak yüklendi — atlandı',
+  analysis_refused: '{file}: analiz yapılamadı ({why})',
+  inference_failed: '{file}: analiz başarısız oldu ({why})',
+};
 
 // The measurement code explains a missing value in English; the review screen translates it.
 const REASONS_TR = {
@@ -327,9 +423,14 @@ const REASONS_TR = {
 };
 
 const LANGS = { en: EN, tr: TR };
-const STORAGE_KEY = 'mammo.lang.v1';
+// Every start is in the server's default language (English unless configured). The EN / TR switch holds for this
+// browser session (this tab or window, through a reload, until it is closed), like the other apps of the project;
+// an older version remembered it for good, and that key is removed.
+const SESSION_KEY = 'mammo.lang.session.v1';
+const OLD_STORAGE_KEY = 'mammo.lang.v1';
 const listeners = new Set();
 let current = 'en';
+try { localStorage.removeItem(OLD_STORAGE_KEY); } catch (error) { /* blocked storage: nothing was kept either */ }
 
 export const LANGUAGES = Object.keys(LANGS);
 
@@ -341,18 +442,68 @@ export function t(key, vars = {}, fallback) {
   return String(text).replace(/\{(\w+)\}/g, (_, name) => (name in vars ? vars[name] : `{${name}}`));
 }
 
+/**
+ * A number as the interface language writes it: 75,6 and −47,2 in Turkish, 75.6 and -47.2 in English.
+ * ``digits === null`` keeps the number as it is (a threshold of 10 stays 10).
+ */
+export function formatNumber(value, digits = 1) {
+  const number = Number(value);
+  const text = digits === null ? String(number) : number.toFixed(digits);
+  return current === 'tr' ? text.replace('.', ',').replace('-', '\u2212') : text;
+}
+
+/** A value with its own unit: a space before the unit (75,6 mm, 98,0 N), none before the degree sign (18,7°). */
+export function formatValue(value, unit = '', digits = 1) {
+  const number = formatNumber(value, digits);
+  return !unit || unit === '°' ? `${number}${unit}` : `${number} ${unit}`;
+}
+
+/** Millimetres, with a space before the unit. */
+export function formatMm(value, digits = 1) {
+  return formatValue(value, 'mm', digits);
+}
+
 export function criterionName(item) {
   return current === 'tr' && CRITERIA_TR[item.id] ? CRITERIA_TR[item.id] : item.name;
 }
 
 export function criterionDetail(item) {
   const detail = item.detail || '';
-  if (current !== 'tr') return detail;
-  for (const [pattern, translate] of DETAILS_TR) {
-    const match = detail.match(pattern);
-    if (match) return translate(...match.slice(1));
+  const template = current === 'tr' ? DETAILS_TR[item.code] : undefined;
+  if (!template) return detail; // English, or a record stored before the codes existed
+  const params = item.params || {};
+  return template.replace(/\{(\w+)\}/g, (_, name) => (
+    name in params ? formatNumber(params[name], name === 'mm' ? 1 : 0) : `{${name}}`));
+}
+
+const fill = (template, params) => template.replace(/\{(\w+)\}/g, (_, name) => (
+  name in params ? String(params[name]) : `{${name}}`));
+
+/**
+ * A refusal of the server as the reader's language says it: `payload` is the error answer ({ detail, code?, params? }).
+ * English, an answer without a code and a code this page does not know all give the server's own sentence.
+ */
+export function serverError(payload) {
+  const detail = payload && typeof payload.detail === 'string' ? payload.detail : '';
+  const template = current === 'tr' && payload ? ERRORS_TR[payload.code] : undefined;
+  if (!template) return detail;
+  const params = payload.params || {};
+  const lines = [fill(template, params)];
+  for (const file of Array.isArray(params.files) ? params.files : []) { // one line per file that was not used
+    const reasonOf = file && PROBLEMS_TR[file.code];
+    lines.push(reasonOf ? fill(reasonOf, file.params || {}) : String((file && file.text) || ''));
   }
-  return detail;
+  return lines.join('\n');
+}
+
+/**
+ * One upload note of a stored study in the reader's language: `note` is the stored English sentence, `entry` the
+ * code and parameters stored with it ({ code, params }). A note stored without a code, English, and a code this page
+ * does not know give the sentence as it is.
+ */
+export function uploadNote(note, entry) {
+  const template = current === 'tr' && entry ? PROBLEMS_TR[entry.code] : undefined;
+  return template ? fill(template, entry.params || {}) : String(note || '');
 }
 
 export function reason(text) {
@@ -362,19 +513,23 @@ export function reason(text) {
 
 export function locale() { return current === 'tr' ? 'tr-TR' : 'en-GB'; }
 
+/** The language picked in this browser session, else `fallback` (the server's default). */
 export function savedLanguage(fallback = 'en') {
   try {
-    const saved = localStorage.getItem(STORAGE_KEY);
-    return saved && LANGS[saved] ? saved : fallback;
+    const picked = sessionStorage.getItem(SESSION_KEY);
+    return picked && LANGS[picked] ? picked : fallback;
   } catch (error) { return fallback; }
 }
 
-/** Apply a language to the static markup and tell every listener; `remember` stores it as the reader's choice. */
+/**
+ * Apply a language to the static markup and tell every listener; `remember` makes it the reader's choice for this
+ * browser session (the next start opens in the default language again).
+ */
 export function setLanguage(lang, { remember = false } = {}) {
   current = LANGS[lang] ? lang : 'en';
   document.documentElement.lang = current;
   if (remember) {
-    try { localStorage.setItem(STORAGE_KEY, current); } catch (error) { /* private mode: session only */ }
+    try { sessionStorage.setItem(SESSION_KEY, current); } catch (error) { /* blocked storage: this page only */ }
   }
   for (const node of document.querySelectorAll('[data-i18n]')) node.textContent = t(node.dataset.i18n);
   for (const node of document.querySelectorAll('[data-i18n-title]')) node.title = t(node.dataset.i18nTitle);

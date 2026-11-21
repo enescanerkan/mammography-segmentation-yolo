@@ -2,7 +2,7 @@
 
 Pure Python + numpy / OpenCV; no model framework is imported here.
 """
-from .config import DEFAULT_CRITERIA, DEFAULT_SEVERE_MM, DEFAULT_THRESHOLD_MM, Rules, default_criteria
+from .config import DEFAULT_SEVERE_MM, DEFAULT_THRESHOLD_MM, Rules
 from .criteria import ACCEPTABLE, CRITERIA_VERSION, GOOD, INFO, NA, POOR, CriteriaGrader
 from .labels import LabelError, apply_labels, clean_labels, clean_rules
 from .measures import (
@@ -20,7 +20,6 @@ from .study import PositioningAssessor, labels_of, public_image
 __all__ = [
     "ACCEPTABLE",
     "CRITERIA_VERSION",
-    "DEFAULT_CRITERIA",
     "DEFAULT_SEVERE_MM",
     "DEFAULT_THRESHOLD_MM",
     "GOOD",
@@ -38,7 +37,6 @@ __all__ = [
     "clean_labels",
     "clean_rules",
     "compare",
-    "default_criteria",
     "labels_of",
     "masks_from_polygons",
     "measure_landmark",

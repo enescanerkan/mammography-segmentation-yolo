@@ -13,14 +13,12 @@ from typing import Any, Dict, List, Optional, Union, get_type_hints
 import yaml
 
 from ...positioning.config import (
-    DEFAULT_CRITERIA,
     DEFAULT_SEVERE_MM,
     DEFAULT_THRESHOLD_MM,
     RETIRED_CRITERIA,
     SEVERE_BOUNDS_MM,
     THRESHOLD_BOUNDS_MM,
     Rules,
-    default_criteria,
 )
 from ...positioning.report import LANGUAGES
 
@@ -69,6 +67,21 @@ class RulesSection:
 
 
 @dataclass
+class NippleSection:
+    # The review app's own nipple steps, after the segmentation model's passes (registry nipple_rescue) have missed.
+    # They are the app's choice and off for every other user of the engine and the registry.
+    brighten: bool = True  # re-window a dark image's anterior tip and search it again (breast_seg.inference.brighten)
+    window_mm: float = 50.0  # side of that window
+    max_gap_mm: Optional[float] = None  # optional: a brightened nipple must lie this close to the breast mask
+    contour: bool = True  # no nipple at all: measure at the farthest breast contour point, marked estimated
+
+    def __post_init__(self) -> None:
+        self.brighten, self.contour = bool(self.brighten), bool(self.contour)
+        self.window_mm = float(self.window_mm)
+        self.max_gap_mm = None if self.max_gap_mm is None else float(self.max_gap_mm)
+
+
+@dataclass
 class ServerSection:
     host: str = "127.0.0.1"
     port: int = 8000
@@ -84,7 +97,7 @@ class AppConfig:
     upload: UploadSection = field(default_factory=UploadSection)
     display: DisplaySection = field(default_factory=DisplaySection)
     rules: RulesSection = field(default_factory=RulesSection)
-    criteria: Dict[str, Dict[str, Any]] = field(default_factory=default_criteria)
+    nipple: NippleSection = field(default_factory=NippleSection)
     server: ServerSection = field(default_factory=ServerSection)
     title: str = "Mammography Positioning Review"
     language: str = "en"  # interface and report default: en | tr
@@ -102,13 +115,14 @@ class AppConfig:
         low, high = SEVERE_BOUNDS_MM
         if not low <= float(self.rules.severe_mm) <= high:
             raise ConfigError(f"rules.severe_mm must be within {SEVERE_BOUNDS_MM}")
-        unknown = set(self.criteria) - set(DEFAULT_CRITERIA)
-        if unknown:
-            raise ConfigError(f"criteria: unknown keys {sorted(unknown)}")
         if self.display.preview_size < 64 or self.display.preview_size > 4096:
             raise ConfigError("display.preview_size must be within 64..4096")
         if self.upload.max_files < 1 or self.upload.max_file_mb < 1:
             raise ConfigError("upload limits must be positive")
+        if not 5.0 <= self.nipple.window_mm <= 200.0:
+            raise ConfigError("nipple.window_mm must be within 5..200")
+        if self.nipple.max_gap_mm is not None and not self.nipple.max_gap_mm >= 0:
+            raise ConfigError("nipple.max_gap_mm must be zero or more, or null")
 
     # ── resolved paths ───────────────────────────────────────────────────
     def resolve(self, value: Union[str, Path]) -> Path:
@@ -168,14 +182,20 @@ def _set(data: Dict[str, Any], dotted: str, value: str) -> None:
 
 
 def app_config_from_dict(data: Optional[Dict[str, Any]], base_dir: Optional[Union[str, Path]] = None) -> AppConfig:
-    """Build an :class:`AppConfig`; ``criteria`` entries override the default bands key by key."""
+    """Build an :class:`AppConfig`.
+
+    A ``criteria:`` section is still accepted, for configs written when criteria had bands: the retired band keys
+    are ignored (no criterion is configurable any more), anything else in it is an error.
+    """
     data = dict(data or {})
-    criteria = default_criteria()
-    for key, band in (data.pop("criteria", None) or {}).items():
-        if key not in RETIRED_CRITERIA:
-            criteria[key] = dict(band)
+    bands = data.pop("criteria", None) or {}
+    if not isinstance(bands, dict):
+        raise ConfigError("criteria: expected a mapping")
+    unknown = set(bands) - RETIRED_CRITERIA
+    if unknown:
+        raise ConfigError(f"criteria: unknown keys {sorted(unknown)} (no criterion has a configurable band)")
     hints = get_type_hints(AppConfig)
-    allowed = {f.name for f in dataclasses.fields(AppConfig)} - {"base_dir", "criteria"}
+    allowed = {f.name for f in dataclasses.fields(AppConfig)} - {"base_dir"}
     sections: Dict[str, Any] = {}
     for key, value in data.items():
         if key not in allowed:
@@ -183,7 +203,7 @@ def app_config_from_dict(data: Optional[Dict[str, Any]], base_dir: Optional[Unio
         kind = hints[key]
         sections[key] = _section(kind, value) if dataclasses.is_dataclass(kind) else value
     try:
-        return AppConfig(**sections, criteria=criteria, base_dir=Path(base_dir) if base_dir else Path.cwd())
+        return AppConfig(**sections, base_dir=Path(base_dir) if base_dir else Path.cwd())
     except TypeError as exc:
         raise ConfigError(str(exc)) from None
 

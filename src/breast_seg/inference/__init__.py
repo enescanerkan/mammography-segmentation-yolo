@@ -2,6 +2,7 @@
 
 Ultralytics is imported only when a model is actually loaded.
 """
+from .brighten import BrightenSearch
 from .engine import (
     MIN_MASK_AREA_PX,
     POLYGON_EPS,
@@ -15,6 +16,7 @@ from .engine import (
 from .loader import ModelLoader, UnsupportedModel, ultralytics_loader
 
 __all__ = [
+    "BrightenSearch",
     "MIN_MASK_AREA_PX",
     "POLYGON_EPS",
     "REQUIRED_ROLES",

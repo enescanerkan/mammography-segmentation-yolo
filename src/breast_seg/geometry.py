@@ -9,7 +9,7 @@ pose keypoints, nipple-to-chest-wall distance in the padded model frame) both li
 """
 
 from dataclasses import dataclass
-from typing import List, Optional, Tuple
+from typing import Any, Callable, List, Optional, Tuple, Union
 
 import cv2
 import numpy as np
@@ -383,3 +383,71 @@ def cc_chestwall_distance(
     if chest_side == "L":
         return float(nipple[0]), np.array([0.0, nipple[1]])
     return float(frame_size - nipple[0]), np.array([float(frame_size), nipple[1]])
+
+
+# ── Fallback point: the breast contour where no nipple was found ──
+
+
+def tissue_contour(tissue: np.ndarray, min_px: int = 200) -> Optional[np.ndarray]:
+    """Largest external contour of the breast-tissue mask as ``(N, 2)`` float canvas points; ``None`` if the mask
+    has fewer than ``min_px`` pixels."""
+    if np.asarray(tissue).sum() < min_px:
+        return None
+    contours, _ = cv2.findContours(np.asarray(tissue).astype(np.uint8), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
+    if not contours:
+        return None
+    return max(contours, key=cv2.contourArea).reshape(-1, 2).astype(float)
+
+
+def line_distances(points: np.ndarray, p1: np.ndarray, p2: np.ndarray) -> np.ndarray:
+    """Distance of every ``(N, 2)`` point to the infinite line through ``p1``-``p2``: :func:`perpendicular_distance`
+    for many points at once. A degenerate line (``p1 == p2``) gives the distances to ``p1``."""
+    points = np.asarray(points, float).reshape(-1, 2)
+    a, b = np.asarray(p1, float), np.asarray(p2, float)
+    d = b - a
+    length = float(np.hypot(d[0], d[1]))
+    if length == 0:
+        return np.hypot(points[:, 0] - a[0], points[:, 1] - a[1])
+    return np.abs(d[0] * (points[:, 1] - a[1]) - d[1] * (points[:, 0] - a[0])) / length
+
+
+def chest_wall_distances(points: np.ndarray, chest_side: str, frame_size: int = 640) -> np.ndarray:
+    """Distance of every ``(N, 2)`` point to the chest-wall edge of a CC frame: :func:`cc_chestwall_distance` for
+    many points at once."""
+    x = np.asarray(points, float).reshape(-1, 2)[:, 0]
+    return x if chest_side == "L" else frame_size - x
+
+
+def farthest_point(points: Optional[np.ndarray], measure: Union[np.ndarray, Callable[[np.ndarray], float]],
+                   within_px: float = 0.0) -> Optional[np.ndarray]:
+    """The point of ``points`` that reaches farthest by ``measure``.
+
+    ``measure`` is either the distances themselves, one per point (from :func:`line_distances` or
+    :func:`chest_wall_distances`), or a function of one point (the evaluation measures each point in original
+    pixels). With ``within_px`` 0 the first point of the largest distance is returned (the rule the contour estimate
+    was evaluated with); with more, the mean of every point within ``within_px`` of the largest distance (the middle
+    of a flat stretch, as the brightened re-search centres its window).
+    """
+    if points is None or len(points) == 0:
+        return None
+    points = np.asarray(points, float)
+    distances = np.asarray([measure(p) for p in points] if callable(measure) else measure, float)
+    if within_px > 0:
+        return points[distances >= distances.max() - within_px].mean(axis=0)
+    return points[int(np.argmax(distances))]
+
+
+def anterior_point(tissue: np.ndarray, chest_side: str, line: Any = None, frame_size: int = 640, min_px: int = 200,
+                   within_px: float = 0.0) -> Optional[np.ndarray]:
+    """The breast-tissue contour point that reaches farthest: from the infinite line through ``line.point_a`` and
+    ``line.point_b`` (an MLO's fitted pectoral line) when a line is given, else from the chest wall, the frame edge
+    on ``chest_side``. One implementation for the review app's contour estimate (``within_px`` 0) and the brightened
+    re-search's anterior tip (``within_px`` 1); None with less than ``min_px`` pixels of tissue."""
+    contour = tissue_contour(tissue, min_px)
+    if contour is None:
+        return None
+    if line is not None:
+        distances = line_distances(contour, line.point_a, line.point_b)
+    else:
+        distances = chest_wall_distances(contour, chest_side, frame_size)
+    return farthest_point(contour, distances, within_px)

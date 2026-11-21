@@ -21,6 +21,7 @@ import numpy as np
 
 from .. import geometry
 from .config import DEFAULT_SEVERE_MM, DEFAULT_THRESHOLD_MM
+from .numbers import fixed
 
 GOOD = "good"
 BAD = "bad"
@@ -54,40 +55,97 @@ def measure_landmark(image: Mapping[str, Any]) -> Dict[str, Any]:
     return result
 
 
-def measure_mask(image: Mapping[str, Any]) -> Dict[str, Any]:
-    """The same two distances, derived from the segmentation masks instead."""
+def measure_mask(image: Mapping[str, Any], contour_fallback: bool = False) -> Dict[str, Any]:
+    """The same two distances, derived from the segmentation masks instead.
+
+    On an MLO the fitted pectoral line is returned as ``line`` whenever the pectoral and breast masks allow it, also
+    when the distance itself cannot be measured (no nipple mask): the pectoral angle and the MLO quality need only
+    the line, and take the nipple from the pose point then.
+
+    ``contour_fallback``: when no nipple contour was found (after every search the engine runs), measure at the
+    breast-tissue contour point that reaches farthest — from the pectoral line on an MLO, from the chest wall on a
+    CC — instead of giving no measurement. Such a result is marked ``"estimated": True`` with ``"nipple":
+    "contour"`` (where its start point came from) and ``"missing"`` (why no nipple was used). It enters the verdict
+    like any other; a nipple contour, once found or drawn, is always measured from instead.
+    """
     masks = image["masks"]
     nipple_mask = masks.get("nipple")
     breast_mask = masks.get("breast-tissue")
-    if nipple_mask is None:
-        return _missing("no nipple mask")
-    if breast_mask is None:
-        return _missing("no breast tissue mask")
 
-    centre = geometry.compute_nipple_centroid(nipple_mask)
+    line = None
+    if image["view"] != "CC" and breast_mask is not None and masks.get("pectoral") is not None:
+        line = geometry.fit_pectoral_line(masks["pectoral"], breast_mask, breast_mask.shape[:2])
+
+    def missing(reason: str) -> Dict[str, Any]:
+        result = _missing(reason)
+        if line is not None:
+            result["line"] = _line_points(line)
+        return result
+
+    if breast_mask is None:
+        return missing("no nipple mask" if nipple_mask is None else "no breast tissue mask")
+
+    centre = geometry.compute_nipple_centroid(nipple_mask) if nipple_mask is not None else None
     if centre is None:
-        return _missing("nipple mask is empty")
+        reason = "no nipple mask" if nipple_mask is None else "nipple mask is empty"
+        if contour_fallback:
+            return _contour_estimate(image, breast_mask, line, reason) or missing(reason)
+        return missing(reason)
 
     mm_per_px = image["mm_per_px"]
-    shape = breast_mask.shape[:2]
 
     if image["view"] == "CC":
-        depth = geometry.compute_cc_depth(centre, breast_mask, shape)
+        depth = geometry.compute_cc_depth(centre, breast_mask, breast_mask.shape[:2])
         if depth is None:
-            return _missing("chest wall edge not found")
+            return missing("chest wall edge not found")
         return _measured(depth.distance_px, mm_per_px, centre, depth.edge_point)
 
-    pectoral_mask = masks.get("pectoral")
-    if pectoral_mask is None:
-        return _missing("no pectoral mask")
-    line = geometry.fit_pectoral_line(pectoral_mask, breast_mask, shape)
+    if masks.get("pectoral") is None:
+        return missing("no pectoral mask")
     if line is None:
-        return _missing("could not fit a pectoral line")
+        return missing("could not fit a pectoral line")
     pnl = geometry.compute_pnl(centre, line)
     result = _measured(pnl.distance_px, mm_per_px, centre, pnl.foot_point)
-    result["line"] = [[float(line.point_a[0]), float(line.point_a[1])],
-                      [float(line.point_b[0]), float(line.point_b[1])]]
+    result["line"] = _line_points(line)
     return result
+
+
+def _contour_estimate(image: Mapping[str, Any], breast_mask: np.ndarray, line: Any,
+                      reason: str) -> Optional[Dict[str, Any]]:
+    """The segmentation measurement at the breast-tissue contour point that reaches farthest, measured exactly as a
+    nipple there would be; None when it cannot be taken (too little tissue, no pectoral line on an MLO, no chest-wall
+    edge on a CC).
+
+    The point is chosen as it was evaluated (``breast_seg.evaluation.fallback``): on an MLO the contour point farthest
+    from the fitted pectoral line taken as an infinite line, on a CC the one farthest from the chest wall, the frame
+    edge on the chest side. (Scored against the fitted *segment* instead, a point below the end of the muscle wins
+    by its distance to that end, and the estimate starts at the bottom of the breast instead of its tip.)
+    """
+    mm_per_px = image["mm_per_px"]
+    side = image.get("chest_side", "L")
+    if image["view"] == "CC":
+        far = geometry.anterior_point(breast_mask, side, None, FRAME)
+        if far is None:
+            return None
+        point = (int(far[0]), int(far[1]))
+        depth = geometry.compute_cc_depth(point, breast_mask, breast_mask.shape[:2])
+        if depth is None:
+            return None
+        result = _measured(depth.distance_px, mm_per_px, point, depth.edge_point)
+    else:
+        far = geometry.anterior_point(breast_mask, side, line, FRAME) if line is not None else None
+        if far is None:
+            return None
+        point = (int(far[0]), int(far[1]))
+        pnl = geometry.compute_pnl(point, line)
+        result = _measured(pnl.distance_px, mm_per_px, point, pnl.foot_point)
+        result["line"] = _line_points(line)
+    result.update(estimated=True, nipple="contour", missing=reason)
+    return result
+
+
+def _line_points(line: Any) -> List[List[float]]:
+    return [[float(line.point_a[0]), float(line.point_a[1])], [float(line.point_b[0]), float(line.point_b[1])]]
 
 
 def pair_verdict(mlo: Optional[Mapping[str, Any]], cc: Optional[Mapping[str, Any]],
@@ -100,16 +158,24 @@ def pair_verdict(mlo: Optional[Mapping[str, Any]], cc: Optional[Mapping[str, Any
     if not mlo.get("ok") or not cc.get("ok"):
         return {"ok": False, "reason": mlo.get("reason") or cc.get("reason") or "no measurement"}
 
-    delta = abs(mlo["mm"] - cc["mm"])
-    return {
+    # Unrounded, like the per-view measurements they come from: whatever shows a millimetre rounds it once
+    # (numbers.py), so a card can never disagree with the value under its image.
+    pnl, wall = float(mlo["mm"]), float(cc["mm"])
+    delta = abs(pnl - wall)
+    result = {
         "ok": True,
-        "pnl_mm": round(mlo["mm"], 2),
-        "cc_mm": round(cc["mm"], 2),
-        "delta_mm": round(delta, 2),
+        "pnl_mm": pnl,
+        "cc_mm": wall,
+        "delta_mm": delta,
         "verdict": GOOD if delta <= threshold else BAD,
         "severe": bool(delta > severe),
         "threshold_mm": threshold,
     }
+    # A view measured without its nipple (the contour fallback): the verdict stands, and says what it rests on.
+    estimated = [view for view, measure in (("MLO", mlo), ("CC", cc)) if measure.get("estimated")]
+    if estimated:
+        result["estimated"] = estimated
+    return result
 
 
 def compare(landmark: Mapping[str, Any], mask: Mapping[str, Any]) -> Dict[str, Any]:
@@ -131,12 +197,12 @@ def compare(landmark: Mapping[str, Any], mask: Mapping[str, Any]) -> Dict[str, A
     if not agree:
         note = "the methods disagree on the verdict — review this study"
     elif wide:
-        note = f"same verdict, but the measurements differ by {gap:.1f} mm"
+        note = f"same verdict, but the measurements differ by {fixed(gap)} mm"
     else:
         note = "both methods agree"
     return {
         "state": "agree" if agree else "disagree",
-        "gap_mm": round(gap, 2),
+        "gap_mm": gap,
         "wide_gap": wide,
         "note": note,
     }
@@ -195,6 +261,38 @@ def summarise(images: List[Mapping[str, Any]], threshold_mm: float = DEFAULT_THR
         "flagged": any(side["comparison"]["state"] != "agree" or side["comparison"].get("wide_gap")
                        for side in sides),
     }
+
+
+def restore_precision(summary: Dict[str, Any], images: List[Mapping[str, Any]]) -> Dict[str, Any]:
+    """Put the unrounded millimetres back into a summary stored with them rounded to two decimals (in place).
+
+    Records written before the summary carried unrounded values showed 47.949 mm as 47.9 mm under the image and, from
+    the summary's 47.95, as 48.0 mm on the card. The per-view measurements such a summary was built from are stored
+    unrounded next to it, so its numbers are restored from them — only where they round to the stored ones, and
+    without touching a verdict: those were decided from the same unrounded values.
+    """
+    by_side: Dict[str, Dict[str, Mapping[str, Any]]] = {}
+    for image in images:
+        by_side.setdefault(image.get("laterality"), {})[image.get("view")] = image
+
+    for side in summary.get("sides") or []:
+        views = by_side.get(side.get("laterality")) or {}
+        deltas = []
+        for route in ("landmark", "mask"):
+            result = side.get(route) or {}
+            mlo = ((views.get("MLO") or {}).get("measures") or {}).get(route) or {}
+            cc = ((views.get("CC") or {}).get("measures") or {}).get(route) or {}
+            if not (result.get("ok") and mlo.get("ok") and cc.get("ok")):
+                continue
+            pnl, wall = float(mlo["mm"]), float(cc["mm"])
+            if round(pnl, 2) != round(float(result["pnl_mm"]), 2) or round(wall, 2) != round(float(result["cc_mm"]), 2):
+                continue  # not the measurements this verdict was decided from: leave it as stored
+            result.update(pnl_mm=pnl, cc_mm=wall, delta_mm=abs(pnl - wall))
+            deltas.append(result["delta_mm"])
+        comparison = side.get("comparison") or {}
+        if len(deltas) == 2 and "gap_mm" in comparison:
+            comparison["gap_mm"] = abs(deltas[0] - deltas[1])
+    return summary
 
 
 # ── helpers ────────────────────────────────────────────────────────────────

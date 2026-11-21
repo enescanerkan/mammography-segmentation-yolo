@@ -23,11 +23,18 @@ rules:
   threshold_mm: 10.0             # |PNL_MLO - D_CC| at or below this is adequate positioning
   severe_mm: 15.0                # beyond this the pair is called clearly inadequate
 
-# Criterion band, {good, acceptable}. Only "pectoral reaches nipple level" is graded; the pectoral angle, nipple
-# centring and gantry angle are shown as information. (The other bands were retired on 2026-11-20; a config that still
-# names them is accepted and the keys are ignored.)
-criteria:
-  pectoral_below_nipple_mm: {good: 0, acceptable: -10}   # negative = pectoral ends above the nipple level
+# The app's own nipple steps, after the segmentation model's passes (models.yaml nipple_rescue) have missed. They are
+# switched here, for this app's engine only: everyone else using the shared registry gets the model passes alone.
+nipple:
+  brighten: true                 # re-window the anterior tip of a dark image and search it again (docs/APP.md)
+  window_mm: 50.0                # side of that window, as evaluated
+  max_gap_mm: null               # optional: a brightened nipple must lie within this many mm of the breast mask
+  contour: true                  # no nipple at all: measure at the farthest breast contour point, marked estimated
+
+# There is no `criteria:` section any more. The one graded criterion, the MLO quality, is a fixed rule (the posterior
+# nipple line meets the pectoral line inside the image); the pectoral angle, nipple centring and gantry angle are
+# shown as information. The bands were retired on 2026-11-20: a config that still has the section with those keys
+# loads, and the keys are ignored.
 
 server:
   host: 127.0.0.1                # 0.0.0.0 to listen on the network (put it behind an authenticated tunnel)

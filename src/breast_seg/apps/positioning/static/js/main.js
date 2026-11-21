@@ -2,14 +2,17 @@
 // label editor and the viewer as full-screen overlays. State lives in one object; every screen change goes
 // through show(), and every translated string is rebuilt by relabel() when the language changes.
 
-import { api } from './api.js';
+import { api, fileList } from './api.js';
 import { drawOverlay, FRAME, LAYERS, layerColor, layerName } from './overlay.js';
 import { appearance } from './appearance.js';
 import { Lightbox } from './lightbox.js';
 import { Editor } from './editor.js';
-import { buildDataset, DICOM_EXT, pathOf, usableFiles } from './dataset.js';
 import {
-  criterionDetail, criterionName, language, locale, onLanguage, reason, savedLanguage, setLanguage, t,
+  buildDataset, DICOM_EXT, PICTURE, pathOf, studyKey, studyUpload, usableFiles, VIEW_IN_PATH,
+} from './dataset.js';
+import {
+  criterionDetail, criterionName, formatMm, formatNumber, formatValue, language, locale, onLanguage, reason,
+  savedLanguage, setLanguage, t, uploadNote,
 } from './i18n.js';
 
 // Hanging order: the right breast sits on the reader's left and the left breast on the reader's right, as if
@@ -20,7 +23,10 @@ const LAYER_STORAGE_KEY = 'mammo.layers.v1';
 const LAYOUT_STORAGE_KEY = 'mammo.layout.v1';
 const CROP_STORAGE_KEY = 'mammo.crop.v1';
 const PAIRING_STORAGE_KEY = 'mammo.pairing.v1';
-const REPORT_LANG_KEY = 'mammo.reportLang.v2';
+// The report's language, like the interface language, holds for the browser session (an older version kept it for
+// good under the old key, which is removed).
+const REPORT_LANG_KEY = 'mammo.reportLang.session.v1';
+const OLD_REPORT_LANG_KEY = 'mammo.reportLang.v2';
 const ROUTE_STYLE = { landmark: 'measure_landmark', mask: 'measure_mask' };
 const DEFAULT_TITLE = 'Mammography Positioning Review';
 
@@ -65,6 +71,7 @@ const ui = {
   datasetState: el('dataset-state'),
   datasetName: el('dataset-name'),
   datasetSkipped: el('dataset-skipped'),
+  datasetLegend: el('dataset-legend'),
   datasetClose: el('dataset-close'),
   uploadIdle: el('upload-idle'),
   uploadBusy: el('upload-busy'),
@@ -152,7 +159,7 @@ const state = {
   crop: loadPref(CROP_STORAGE_KEY, '1') === '1',
   pairing: null,
   report: null,
-  reportLang: loadPref(REPORT_LANG_KEY, null), // null: follow the interface language
+  reportLang: loadSessionPref(REPORT_LANG_KEY), // null: follow the interface language; a pick holds for the session
   dataset: null, // { name, studies: [{name, files}], index, ids: Map, jobs: Map, failed: Set, finished }
 };
 
@@ -188,6 +195,14 @@ function loadPref(key, fallback) {
     const value = localStorage.getItem(key);
     return value === null ? fallback : value;
   } catch (error) { return fallback; }
+}
+
+function loadSessionPref(key) {
+  try { return sessionStorage.getItem(key); } catch (error) { return null; }
+}
+
+function saveSessionPref(key, value) {
+  try { sessionStorage.setItem(key, value); } catch (error) { /* blocked storage: this page only */ }
 }
 
 function savePref(key, value) {
@@ -257,10 +272,10 @@ function contentBox(bitmap) {
 
 const boxOf = (viewKey) => (state.crop && state.boxes.get(viewKey)) || [0, 0, FRAME, FRAME];
 
-// One transform shared by every tile: comparing left with right means looking at the same place in both, so
-// panning one pans all. The toggle exists because a single odd view sometimes needs its own look.
+// Every tile zooms and pans on its own by default; "Synchronise zoom & pan" shares one transform between them, for
+// looking at the same place on the left and the right.
 state.view = { zoom: 1, x: 0, y: 0 };
-state.syncViews = true;
+state.syncViews = false;
 state.tileViews = new Map(); // view_key -> its own transform when unsynced
 
 function viewOf(viewKey) {
@@ -277,12 +292,34 @@ function resetViews() {
 
 const capacity = () => state.layout.cols * state.layout.rows;
 
-/** The view keys shown on each page, for the current layout and pairing. */
-function pages() {
+/** The views a study holds, in grid order. */
+function presentViews(study) {
+  if (!study) return VIEW_ORDER;
+  const present = VIEW_ORDER.filter((key) => study.images.some((image) => image.view_key === key));
+  return present.length ? present : VIEW_ORDER;
+}
+
+/**
+ * The view keys shown on each page, for the current layout and pairing. Only the views the study holds take a pane: a
+ * study of one breast (or of one projection) fills the screen with its two views, a single view fills it alone, and a
+ * page that would hold none is left out. A four-view grid missing one view keeps its hanging order, with the missing
+ * view marked "not uploaded" in its place.
+ */
+function pages(study = state.study) {
+  const present = presentViews(study);
   const size = capacity();
-  if (size >= 4) return [VIEW_ORDER];
-  if (size === 1) return VIEW_ORDER.map((key) => [key]);
-  return PAIRINGS[state.pairing].pages;
+  if (size >= 4) return [present.length === 3 ? VIEW_ORDER : present];
+  if (size === 1) return present.map((key) => [key]);
+  const paired = PAIRINGS[state.pairing].pages.map((page) => page.filter((key) => present.includes(key)));
+  return paired.filter((page) => page.length);
+}
+
+/** The grid of a page with `count` panes: the layout's, or a smaller one when the page holds fewer views. */
+function gridOf(count) {
+  if (count >= capacity()) return state.layout;
+  if (count <= 1) return { cols: 1, rows: 1 };
+  if (count === 2) return state.layout.cols === 1 ? { cols: 1, rows: 2 } : { cols: 2, rows: 1 };
+  return state.layout; // three of four: the 2 x 2 hanging, with the missing view in its place
 }
 
 const pageCount = () => pages().length;
@@ -297,6 +334,18 @@ const lightbox = new Lightbox({
   zoomReset: el('zoom-reset'),
   zoomLevel: el('zoom-level'),
 }, () => state.visible);
+
+/** Switch overlay layers (the review's toggles, the viewer and the editor all draw by this one set). */
+function setLayers(ids, on) {
+  for (const id of ids) {
+    if (on) state.visible.add(id);
+    else state.visible.delete(id);
+  }
+  saveLayerPrefs();
+  buildLayerBar();
+  redrawTiles();
+  lightbox.render();
+}
 
 const editor = new Editor({
   root: el('editor'),
@@ -315,7 +364,14 @@ const editor = new Editor({
   zoomOut: el('editor-zoom-out'),
   zoomFit: el('editor-zoom-fit'),
   zoomLevel: el('editor-zoom-level'),
-}, { onSave: saveLabels, onClose: closeEditor });
+  hide: el('editor-hide'),
+  clean: el('editor-clean'),
+}, {
+  onSave: saveLabels,
+  onClose: closeEditor,
+  onClean: (viewKey, polygons) => api.cleanView(editor.studyId, viewKey, polygons),
+  layers: { has: (id) => state.visible.has(id), set: setLayers },
+});
 
 // ── small helpers ──────────────────────────────────────────────────────────
 function saveLayerPrefs() { savePref(LAYER_STORAGE_KEY, JSON.stringify([...state.visible])); }
@@ -328,6 +384,17 @@ function showError(message, tone = 'error') {
 
 function clearError() { ui.banner.hidden = true; }
 
+/** Remove `message` from the banner, and only that: a notice shown since then stays. */
+function clearErrorIf(message) {
+  if (!ui.banner.hidden && ui.bannerText.textContent === message) clearError();
+}
+
+/** A notice that goes away by itself, unless something else has taken the banner meanwhile. */
+function showBriefly(message, tone, ms = 3000) {
+  showError(message, tone);
+  return setTimeout(() => clearErrorIf(message), ms);
+}
+
 function show(screen) {
   state.screen = screen;
   for (const [name, node] of Object.entries(ui.screens)) node.hidden = name !== screen;
@@ -336,6 +403,14 @@ function show(screen) {
     ui.reportPanel.hidden = true;
     ui.notesPop.hidden = true;
   }
+}
+
+/** Date and time, for a list where rows from different days sit together. */
+function formatDateTime(seconds) {
+  if (!seconds) return '—';
+  return new Date(seconds * 1000).toLocaleString(locale(), {
+    day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit',
+  });
 }
 
 function formatTime(seconds) {
@@ -365,13 +440,14 @@ const reportLanguage = () => state.reportLang || language();
 function comparisonNote(comparison) {
   if (comparison.state === 'disagree') return t('cmp_disagree');
   if (comparison.state === 'agree') {
-    return comparison.wide_gap ? t('cmp_wide', { gap: Number(comparison.gap_mm).toFixed(1) }) : t('cmp_agree');
+    return comparison.wide_gap ? t('cmp_wide', { gap: formatNumber(comparison.gap_mm) }) : t('cmp_agree');
   }
   return t(comparison.state === 'partial' ? 'cmp_partial' : 'cmp_none');
 }
 
 // ── boot: splash until the models are loaded ───────────────────────────────
 async function boot() {
+  try { localStorage.removeItem(OLD_REPORT_LANG_KEY); } catch (error) { /* blocked storage: nothing was kept */ }
   setLanguage(savedLanguage('en'));
   buildLayerBar();
   buildCellGrid();
@@ -501,6 +577,7 @@ function relabel() {
   if (!colorEditing) buildColorGrid();
   renderStatus();
   renderRetention();
+  relabelClear();
   if (state.history) renderHistory(state.history);
   if (state.study) {
     renderReview(state.study);
@@ -518,14 +595,7 @@ function buildLayerBar() {
     const input = document.createElement('input');
     input.type = 'checkbox';
     input.checked = state.visible.has(layer.id);
-    input.addEventListener('change', () => {
-      if (input.checked) state.visible.add(layer.id);
-      else state.visible.delete(layer.id);
-      label.classList.toggle('on', input.checked);
-      saveLayerPrefs();
-      redrawTiles();
-      lightbox.render();
-    });
+    input.addEventListener('change', () => setLayers([layer.id], input.checked));
 
     const swatch = document.createElement('span');
     swatch.className = 'swatch';
@@ -559,7 +629,7 @@ function wireEvents() {
   ui.folderInput.addEventListener('change', () => {
     const files = [...ui.folderInput.files];
     ui.folderInput.value = '';
-    if (files.length) upload(pickLikelyDicoms(files));
+    if (files.length) uploadPicked(files);
   });
   ui.chooseDataset.addEventListener('click', (event) => { event.stopPropagation(); ui.datasetInput.click(); });
   ui.datasetInput.addEventListener('change', () => {
@@ -598,7 +668,7 @@ function wireEvents() {
       .map((item) => (item.webkitGetAsEntry ? item.webkitGetAsEntry() : null))
       .filter(Boolean);
     const files = entries.length ? await collectFiles(entries) : [...(transfer.files || [])];
-    if (files.length) upload(pickLikelyDicoms(files));
+    if (files.length) uploadPicked(files);
   });
   window.addEventListener('dragover', (event) => event.preventDefault());
   window.addEventListener('drop', (event) => event.preventDefault());
@@ -701,7 +771,7 @@ function wireEvents() {
   window.addEventListener('resize', debounce(redrawTiles, 120));
   window.addEventListener('hashchange', () => {
     const id = location.hash.replace('#', '').trim();
-    if (id && (!state.study || state.study.id !== id)) openStudy(id);
+    if (id && (!state.study || state.study.id !== id)) openStored(id);
   });
 }
 
@@ -711,14 +781,16 @@ function isTyping(target) {
     || target instanceof HTMLTextAreaElement || Boolean(target && target.isContentEditable);
 }
 
-/** An overlay, drawer or popover is open: page-level shortcuts stay quiet. */
+/**
+ * Something that covers the review or takes the keyboard is open: page-level shortcuts stay quiet. The criteria
+ * drawer is not one of them: it sits under the board, next to the images, and is read while stepping through studies.
+ */
 function panelOpen() {
-  return [el('editor'), el('lightbox'), ui.criteriaDrawer, ui.reportPanel, ui.notesPop, ui.layoutPop, ui.stylePop]
+  return [el('editor'), el('lightbox'), ui.reportPanel, ui.notesPop, ui.layoutPop, ui.stylePop]
     .some((node) => node && !node.hidden);
 }
 
 // ── upload ─────────────────────────────────────────────────────────────────
-const VIEW_IN_PATH = /(^|[^a-z])(?:[lr][\W_]*)?(?:mlo|cc)([^a-z]|$)/i;
 const uploadLimit = () => (state.health && state.health.upload && state.health.upload.max_files) || 40;
 
 /** Depth-first walk of dropped directory entries, keeping the relative path. */
@@ -764,22 +836,116 @@ function pickLikelyDicoms(files) {
   return (byExt.length ? byExt : usable).slice(0, limit);
 }
 
+/**
+ * Why nothing of `files` can be sent, in words that name the files: pictures (PNG/JPG cannot be measured), empty
+ * files (0 bytes; a folder dropped where files were expected also arrives as one), or nothing that could be DICOM.
+ */
+function nothingToSend(files) {
+  const pictures = files.filter((file) => file.size > 0 && PICTURE.test(pathOf(file)));
+  if (pictures.length) return t('only_dicom', { names: fileList(pictures) });
+  const empty = files.filter((file) => file.size === 0);
+  if (empty.length) return t(empty.length === 1 ? 'empty_file_1' : 'empty_files', { files: fileList(empty) });
+  return t('no_dicom_files', { n: files.length });
+}
+
+/** A folder or a drop: the files worth sending, or a message saying why there are none. */
+function uploadPicked(files) {
+  const picked = pickLikelyDicoms(files);
+  if (picked.length) upload(picked);
+  else showError(nothingToSend(files));
+}
+
+// "Clear" deletes every study on the server, so it takes two deliberate clicks: the first counts what is stored
+// and says so, the second (not part of a double click, within a few seconds) deletes exactly that many.
+const CLEAR_ARM_MS = 8000;
+const CLEAR_MIN_GAP_MS = 600;
+let clearArmed = null;
+
+let clearCounting = false;
+
+function disarmClear() {
+  if (clearArmed) clearTimeout(clearArmed.timer);
+  clearArmed = null;
+  ui.clearHistory.textContent = t('clear');
+  ui.clearHistory.classList.remove('armed');
+}
+
+// The count includes studies a dataset analysed ahead that nobody opened: they are stored, though not listed.
+function clearQuestion(total, unopened) {
+  return t('clear_confirm', { n: total }) + (unopened ? ` ${t('clear_unopened', { k: unopened })}` : '');
+}
+
+/**
+ * An armed "clear" in the new language: the button's static label was just reset to "Clear" (data-i18n), so the
+ * armed label and its question are written again, still armed for the same count and the same time.
+ */
+function relabelClear() {
+  if (!clearArmed) return;
+  const { count, unopened, message: before } = clearArmed;
+  const message = clearQuestion(count, unopened);
+  ui.clearHistory.textContent = t('clear_arm', { n: count });
+  if (!ui.banner.hidden && ui.bannerText.textContent === before) ui.bannerText.textContent = message;
+  clearArmed.message = message;
+}
+
 async function clearHistory() {
-  if (!window.confirm(t('clear_confirm'))) return;
+  if (!clearArmed) {
+    if (clearCounting) return; // a second first click while the first is still counting: one question, one timer
+    clearCounting = true;
+    let total;
+    let unopened;
+    try {
+      ({ total, unopened } = await api.listStudies({ limit: 0 })); // the counts only: no record is read for them
+    } catch (error) {
+      showError(error.message);
+      return;
+    } finally {
+      clearCounting = false;
+    }
+    if (!total) {
+      showBriefly(t('clear_nothing'), 'info');
+      return;
+    }
+    disarmClear(); // never two timers
+    const message = clearQuestion(total, unopened);
+    // When the time is up only this question is taken down (in whichever language it is shown by then): a notice
+    // that appeared meanwhile stays.
+    const timer = setTimeout(() => {
+      const shown = clearArmed ? clearArmed.message : message;
+      disarmClear();
+      clearErrorIf(shown);
+    }, CLEAR_ARM_MS);
+    clearArmed = { count: total, unopened, at: Date.now(), timer, message };
+    ui.clearHistory.textContent = t('clear_arm', { n: total });
+    ui.clearHistory.classList.add('armed');
+    showError(message);
+    return;
+  }
+  if (Date.now() - clearArmed.at < CLEAR_MIN_GAP_MS) return; // the second half of a double click
+  const { count: expected, message } = clearArmed;
+  disarmClear();
+  clearErrorIf(message);
   try {
-    const { deleted } = await api.deleteAll();
+    // The server refuses when the count changed since the first click, so nothing unseen is deleted.
+    const { deleted } = await api.deleteAll(expected);
     if (state.dataset) {
-      // The dataset list stays; every study in it is analysed again when it is reached.
+      // The dataset list stays, as it was when the folder was opened: no record is left, so no study is opened,
+      // stored or removed any more, and every study is analysed again when it is reached. Only an analysis still
+      // running is kept waiting for: its record is stored after this clear and is used when it arrives.
       const dataset = state.dataset;
+      for (const index of [...dataset.jobs.keys()]) {
+        if (dataset.ids.has(index)) dataset.jobs.delete(index);
+      }
       dataset.ids.clear();
-      dataset.jobs.clear();
+      dataset.opened.clear();
+      dataset.removed.clear();
+      dataset.finished = false;
       renderDatasetPicker();
       renderDatasetNav();
     }
     if (state.study) startNewStudy();
     else await refreshHistory();
-    showError(deleted === 1 ? t('deleted_1') : t('deleted_n', { n: deleted }));
-    setTimeout(clearError, 3000);
+    showBriefly(deleted === 1 ? t('deleted_1') : t('deleted_n', { n: deleted }));
   } catch (error) {
     showError(error.message);
   }
@@ -816,8 +982,12 @@ async function upload(files) {
   clearError();
 
   const accepted = files.filter((file) => file.size > 0);
-  if (!accepted.length) { showError(t('empty_files')); return; }
+  if (!accepted.length) { showError(nothingToSend(files)); return; }
+  const empty = files.filter((file) => file.size === 0);
 
+  // A study uploaded on its own is not part of the open dataset: the dataset is left, as with "New study", so its
+  // bar does not stay over a study it does not hold.
+  closeDataset();
   state.busy = true;
   state.cancelled = false;
   state.aborter = new AbortController();
@@ -859,6 +1029,8 @@ async function upload(files) {
     state.busy = false;
     setUploading(false);
     await showStudy(study);
+    // The study is shown; the files that were left out for being empty are named, so none goes missing silently.
+    if (empty.length) showError(t('empty_skipped', { files: fileList(empty) }), 'info');
     refreshHistory();
   } catch (error) {
     clearInterval(timer);
@@ -889,32 +1061,60 @@ function startNewStudy() {
 
 // ── dataset ────────────────────────────────────────────────────────────────
 // A folder of many studies, reviewed one study at a time. Studies are analysed only when reached; the next one is
-// analysed in the background while the current one is on screen, so moving on is usually instant. Closing the
-// dataset aborts whatever is still in flight.
+// analysed in the background while the current one is on screen, so moving on is usually instant.
+//
+// The page never deletes a record on its own account: another tab or another reviewer may have opened it. A study
+// analysed ahead is stored as "not opened yet" and is not listed among the recent studies; it is listed from the
+// moment any page puts it on screen for review (openStudy tells the server), by whatever route. A record nobody
+// opens is removed by the retention window like any other. Leaving the dataset or the page changes nothing on the
+// server, and an analysis still running then simply finishes.
+//
+// Every dataset study is stored under its study key (dataset.js). Opening the same folder again asks the server
+// which of the keys it holds and shows those studies from their stored records, corrections included, without
+// uploading them a second time; they carry the • mark until they are opened in this session. A study that was
+// stored from an incomplete upload (a file failed in a way a retry can change) is not offered again unless a reviewer
+// edited it: it is analysed afresh, and the new record replaces the old one.
 
 async function openDataset(files) {
   if (state.busy) { showError(t('busy_wait')); return; }
   clearError();
-  closeDataset();
+  // The folder is read first: the dataset that is open stays open until the new one is known to hold a study.
+  const back = () => show(state.study ? 'review' : 'landing');
   state.busy = true;
   ui.progressText.textContent = t('ds_scanning', { d: 0, n: files.length });
   show('processing');
   let dataset;
+  let found = {};
   try {
     dataset = await buildDataset(files, (done, total) => {
       ui.progressText.textContent = t('ds_scanning', { d: done, n: total });
     });
+    // The UID has done its work once the key is made: it is not kept.
+    const salt = (state.health && state.health.dataset && state.health.dataset.key_salt) || '';
+    dataset.studies = dataset.studies.map(({ name, files: list, uid }) => (
+      { name, files: list, key: studyKey(salt, uid, list) }));
+    const keys = dataset.studies.map((study) => study.key).filter(Boolean);
+    if (keys.length) {
+      // Without an answer every study is simply analysed when it is reached, as if nothing were stored.
+      found = await api.lookupStudies(keys).then((reply) => (reply && reply.found) || {}, () => ({}));
+    }
+  } catch (error) {
+    back();
+    showError(t('ds_unreadable', { msg: (error && error.message) || String(error) }));
+    return;
   } finally {
     state.busy = false;
   }
   if (!dataset.studies.length) {
-    show(state.study ? 'review' : 'landing');
+    back();
     showError(t('ds_empty'));
     return;
   }
+  closeDataset();
   state.dataset = {
     ...dataset,
     index: 0,                 // the study on screen (moves only once the next one is shown)
+    cursor: 0,                // the last study asked for: Next / Previous step from here, also past one that failed
     target: null,             // the study being opened
     moving: false,
     finished: false,
@@ -925,14 +1125,22 @@ async function openDataset(files) {
     removed: new Set(),
     aborter: new AbortController(),
   };
+  state.dataset.studies.forEach((study, index) => {
+    const stored = study.key && found[study.key];
+    if (typeof stored !== 'string') return;
+    state.dataset.ids.set(index, stored);       // already on the server: opened from its record, not uploaded
+    state.dataset.jobs.set(index, Promise.resolve(stored));
+  });
   renderDatasetPicker();
   goToStudy(0);
 }
 
+/** Leave the dataset. Nothing is removed from the server: what was analysed ahead stays, not opened yet. */
 function closeDataset() {
-  if (state.dataset) state.dataset.aborter.abort();
+  const dataset = state.dataset;
   state.dataset = null;
   ui.datasetNav.hidden = true;
+  if (dataset) dataset.aborter.abort(); // stops the study that is being opened, not an analysis on the server
 }
 
 /** Forget a study's stored record, so reaching it again analyses it again. */
@@ -941,16 +1149,31 @@ function forgetStudy(dataset, index) {
   dataset.jobs.delete(index);
 }
 
+/** How many files of dataset study `index` are not sent, because the server takes only so many per study. */
+function leftOut(dataset, index) {
+  const study = dataset.studies[index];
+  return study ? studyUpload(study.files, uploadLimit()).left : 0;
+}
+
 /** The stored study id of dataset study `index`, analysing it first if nobody has yet. */
 function ensureStudy(index) {
   const dataset = state.dataset;
   if (!dataset || index < 0 || index >= dataset.studies.length) return Promise.resolve(null);
   if (!dataset.jobs.has(index)) {
-    // The files were sorted out when the dataset was built; only the server's per-upload cap applies here.
-    const files = dataset.studies[index].files.slice(0, uploadLimit());
-    const job = api.createStudy(files, { signal: dataset.aborter.signal }).then((record) => {
+    // The files were sorted out when the dataset was built; only the server's per-upload cap applies here, with
+    // the files whose path names a view first, as in a single-study upload (goToStudy says when some stay behind).
+    const study = dataset.studies[index];
+    const { files, left } = studyUpload(study.files, uploadLimit());
+    // Stored as "not opened yet": the reviewer may never get to it. openStudy says when it is on screen.
+    const job = api.createStudy(files, { studyKey: study.key, unopened: true, leftOut: left }).then((record) => {
+      if (state.dataset !== dataset || dataset.jobs.get(index) !== job) {
+        // Nobody here is waiting for this record any more (the dataset was closed, or the study was forgotten
+        // while it was being analysed). It is left where it is: stored, not opened yet, and found by its key when
+        // the folder is opened again.
+        throw new Error(t('cancelled'));
+      }
       dataset.ids.set(index, record.id);
-      if (state.dataset === dataset) updateDatasetOption(index);
+      updateDatasetOption(index);
       return record.id;
     });
     job.catch(() => { if (dataset.jobs.get(index) === job) dataset.jobs.delete(index); }); // tried again when reached
@@ -962,17 +1185,23 @@ function ensureStudy(index) {
 function stepStudy(step) {
   const dataset = state.dataset;
   if (!dataset || dataset.moving) return;
-  const target = dataset.index + step;
+  // From the last study asked for, not from the one on screen: a study that fails is stepped over in either
+  // direction instead of being tried again for ever, and Finish works when the last one failed.
+  const target = dataset.cursor + step;
   if (target >= dataset.studies.length) { finishDataset(); return; }
   if (target >= 0) goToStudy(target);
 }
 
 async function goToStudy(index, retried = false) {
   const dataset = state.dataset;
-  if (!dataset || dataset.moving || index < 0 || index >= dataset.studies.length) return;
-  if (state.busy) { showError(t('busy_wait')); return; }
+  if (!dataset) return;
+  // Every way out that does not move puts the bar back on the study it is on: the list would otherwise keep
+  // showing the study that was picked while another one stays on screen.
+  if (dataset.moving || !(index >= 0 && index < dataset.studies.length)) { renderDatasetNav(); return; }
+  if (state.busy) { showError(t('busy_wait')); renderDatasetNav(); return; }
   dataset.moving = true;
   dataset.target = index;
+  dataset.cursor = index;
   clearError();
   renderDatasetNav();
   ui.progressText.textContent = t('ds_analysing', { i: index + 1, n: dataset.studies.length });
@@ -1007,6 +1236,11 @@ async function goToStudy(index, retried = false) {
     dataset.removed.delete(index);
     updateDatasetOption(index);
     renderDatasetNav();
+    const left = leftOut(dataset, index);
+    if (left) {
+      const total = dataset.studies[index].files.length;
+      showError(t('ds_left_out', { n: total, limit: total - left, left }), 'info');
+    }
     ensureStudy(index + 1).catch(() => {}); // analyse the next study while this one is read
     return;
   }
@@ -1026,18 +1260,37 @@ function finishDataset() {
   dataset.finished = true;
   renderDatasetNav();
   const total = dataset.studies.length;
-  const opened = dataset.opened.size;
-  const failed = [...dataset.failed].filter((index) => !dataset.opened.has(index)).length;
-  showError(opened === total
+  const counts = datasetCounts(dataset);
+  const parts = ['opened', 'analysed', 'failed', 'removed', 'unseen']
+    .filter((kind) => counts[kind]).map((kind) => t(`ds_part_${kind}`, { c: counts[kind] }));
+  showError(counts.opened === total
     ? t('ds_finished_all', { n: total })
-    : t('ds_finished_counts', { o: opened, n: total, f: failed, u: total - opened - failed }), 'info');
+    : t('ds_finished_counts', { n: total, parts: parts.join(', ') }), 'info');
 }
 
+/**
+ * What became of one study of the dataset. The list marks and the finish summary both read this, so they agree:
+ * opened (✓, shown on screen in this session), analysed (•, a record is on the server — analysed ahead just now, or
+ * kept from an earlier session — but it has not been opened in this one), failed (✕), removed (–), or unseen.
+ */
+function datasetState(dataset, index) {
+  if (dataset.removed.has(index)) return 'removed';
+  if (dataset.opened.has(index)) return 'opened';
+  if (dataset.failed.has(index)) return 'failed';
+  if (dataset.ids.has(index)) return 'analysed';
+  return 'unseen';
+}
+
+function datasetCounts(dataset) {
+  const counts = { opened: 0, analysed: 0, failed: 0, removed: 0, unseen: 0 };
+  dataset.studies.forEach((_, index) => { counts[datasetState(dataset, index)] += 1; });
+  return counts;
+}
+
+const DATASET_MARKS = { opened: ' ✓', analysed: ' •', failed: ' ✕', removed: ' –', unseen: '' };
+
 function datasetOptionText(dataset, index) {
-  let mark = '';
-  if (dataset.removed.has(index)) mark = ' –';
-  else if (dataset.failed.has(index)) mark = ' ✕';
-  else if (dataset.ids.has(index)) mark = ' ✓';
+  const mark = DATASET_MARKS[datasetState(dataset, index)];
   return t('ds_option', { i: index + 1, n: dataset.studies.length, name: dataset.studies[index].name }) + mark;
 }
 
@@ -1045,13 +1298,15 @@ function datasetOptionText(dataset, index) {
 function renderDatasetPicker() {
   const dataset = state.dataset;
   if (!dataset) return;
+  ui.datasetPick.title = t('ds_mark_title');
+  ui.datasetLegend.textContent = t('ds_legend'); // what the marks of the list mean, without hovering
   ui.datasetPick.replaceChildren(...dataset.studies.map((_, index) => {
     const option = document.createElement('option');
     option.value = String(index);
     option.textContent = datasetOptionText(dataset, index);
     return option;
   }));
-  ui.datasetPick.value = String(dataset.index);
+  ui.datasetPick.value = String(dataset.cursor);
 }
 
 function updateDatasetOption(index) {
@@ -1065,14 +1320,19 @@ function renderDatasetNav() {
   ui.datasetNav.hidden = !dataset;
   if (!dataset) return;
   const total = dataset.studies.length;
-  const last = dataset.index === total - 1;
+  const at = dataset.cursor;
+  const last = at === total - 1;
   ui.datasetName.textContent = dataset.name;
   ui.datasetName.title = dataset.name;
   ui.datasetName.hidden = !dataset.name;
-  ui.datasetSkipped.textContent = dataset.skipped ? t('ds_skipped', { n: dataset.skipped }) : '';
-  if (ui.datasetPick.value !== String(dataset.index)) ui.datasetPick.value = String(dataset.index);
+  const left = leftOut(dataset, at);
+  ui.datasetSkipped.textContent = [
+    dataset.skipped ? t('ds_skipped', { n: dataset.skipped }) : '',
+    left ? t('ds_left_short', { n: dataset.studies[at].files.length, left }) : '',
+  ].filter(Boolean).join(' · ');
+  if (ui.datasetPick.value !== String(at)) ui.datasetPick.value = String(at);
   ui.datasetPick.disabled = dataset.moving;
-  ui.datasetPrev.disabled = dataset.moving || dataset.index === 0;
+  ui.datasetPrev.disabled = dataset.moving || at === 0;
   ui.datasetNext.disabled = dataset.moving || (last && dataset.finished);
   ui.datasetNext.title = last ? t('ds_finish') : t('ds_next_title');
   el('dataset-next-label').textContent = last ? t('ds_finish_btn') : t('ds_next_btn');
@@ -1080,9 +1340,9 @@ function renderDatasetNav() {
   let tone = '';
   let text = '';
   if (dataset.moving) text = t('ds_working', { i: dataset.target + 1 });
-  else if (dataset.removed.has(dataset.index) && !state.study) { tone = 'error'; text = t('ds_state_removed'); }
-  else if (dataset.failed.has(dataset.index)) { tone = 'error'; text = t('ds_state_failed'); }
-  else if (dataset.finished) { tone = 'done'; text = t('ds_done', { o: dataset.opened.size, n: total }); }
+  else if (dataset.removed.has(at) && !state.study) { tone = 'error'; text = t('ds_state_removed'); }
+  else if (dataset.failed.has(at)) { tone = 'error'; text = t('ds_state_failed'); }
+  else if (dataset.finished) { tone = 'done'; text = t('ds_done', { o: datasetCounts(dataset).opened, n: total }); }
   else if (last) text = t('ds_last');
   ui.datasetState.textContent = text;
   if (tone) ui.datasetState.dataset.tone = tone;
@@ -1115,6 +1375,8 @@ async function loadBitmaps(study, onProgress = () => {}) {
 async function showStudy(study, signal) {
   await loadBitmaps(study);
   if (signal && signal.aborted) return false;
+  // Another study starts on its first page (its views are not the last one's); the same study, saved, stays put.
+  if (!state.study || state.study.id !== study.id) state.page = 0;
   state.study = study;
   state.report = null;
 
@@ -1147,16 +1409,34 @@ function loadImage(url) {
 
 function renderNotices(study) {
   const notices = [];
-  if ((study.summary || {}).flagged) notices.push({ text: t('notice_flagged'), tone: 'warn' });
+  // The card's own sentence for each breast that needs a look, so the card and the notes never word the same
+  // situation differently: a verdict disagreement, a wide gap under the same verdict, or a single method.
+  for (const side of (study.summary || {}).sides || []) {
+    const comparison = side.comparison || {};
+    if (comparison.state === 'agree' && !comparison.wide_gap) continue;
+    const name = side.laterality === 'R' ? t('right_breast') : t('left_breast');
+    const tone = comparison.state === 'disagree' || comparison.wide_gap ? 'warn' : 'info';
+    notices.push({ text: `${name}: ${comparisonNote(comparison)}`, tone });
+  }
   const unknownScale = study.images.filter((image) => !image.pixel_spacing_known);
   if (unknownScale.length) {
     notices.push({ tone: 'info', text: t('notice_spacing', { views: unknownScale.map((i) => i.view_key).join(', ') }) });
   }
-  // Files the upload stepped over are worth recording but are not findings; they sit at the bottom of the list
-  // in a quieter style.
-  for (const problem of study.problems || []) {
-    notices.push({ text: problem, tone: /\bskipped\b/.test(problem) ? 'skip' : 'warn' });
+  // A view measured without its nipple (the contour fallback): its verdict rests on an estimate.
+  for (const viewKey of VIEW_ORDER) {
+    const image = study.images.find((entry) => entry.view_key === viewKey);
+    if (image && isEstimated(image)) notices.push({ tone: 'warn', text: t(`notice_estimated_${image.view}`, { view: viewKey }) });
   }
+  // Files the upload stepped over are worth recording but are not findings; they sit at the bottom of the list
+  // in a quieter style. Written in the reader's language from the codes stored with them; a record stored before
+  // the codes were kept shows its English sentences.
+  const coded = Array.isArray(study.problem_codes) && study.problem_codes.length === (study.problems || []).length
+    ? study.problem_codes : [];
+  (study.problems || []).forEach((problem, index) => {
+    const entry = coded[index];
+    const skipped = entry ? SKIP_CODES.has(entry.code) : /\bskipped\b/.test(problem);
+    notices.push({ text: uploadNote(problem, entry), tone: skipped ? 'skip' : 'warn' });
+  });
 
   ui.notices.replaceChildren(...notices.map((notice) => {
     const item = document.createElement('li');
@@ -1173,6 +1453,12 @@ function renderNotices(study) {
   if (!notices.length) setNotes(false);
 }
 
+// Upload notes about a file that was stepped over by design (not a view of the study), shown in the quieter style.
+const SKIP_CODES = new Set(['not_an_image', 'raster_image', 'duplicate_view']);
+
+/** The segmentation route of the view was measured without a nipple (the contour fallback). */
+const isEstimated = (image) => Boolean(((image.measures || {}).mask || {}).estimated);
+
 function setNotes(open) {
   ui.notesPop.hidden = !open;
   ui.notesToggle.setAttribute('aria-expanded', String(open));
@@ -1180,13 +1466,14 @@ function setNotes(open) {
 
 function renderQuad(study) {
   const byKey = new Map(study.images.map((image) => [image.view_key, image]));
-  const layoutPages = pages();
+  const layoutPages = pages(study);
   state.page = Math.min(Math.max(state.page, 0), layoutPages.length - 1);
   const shown = layoutPages[state.page];
 
   state.tiles.clear();
-  ui.quad.style.gridTemplateColumns = `repeat(${state.layout.cols}, minmax(0, 1fr))`;
-  ui.quad.style.gridTemplateRows = `repeat(${state.layout.rows}, minmax(0, 1fr))`;
+  const grid = gridOf(shown.length);
+  ui.quad.style.gridTemplateColumns = `repeat(${grid.cols}, minmax(0, 1fr))`;
+  ui.quad.style.gridTemplateRows = `repeat(${grid.rows}, minmax(0, 1fr))`;
   ui.quad.replaceChildren(...shown.map((viewKey) => {
     const image = byKey.get(viewKey);
     return image ? buildTile(image) : buildMissingTile(viewKey);
@@ -1384,12 +1671,19 @@ function buildTile(image) {
     swatch.style.background = appearance.colorOf(ROUTE_STYLE[route]);
     span.appendChild(swatch);
     if (measure.ok) {
-      span.append(document.createTextNode(`${measure.mm.toFixed(1)} mm`));
+      span.append(document.createTextNode(formatMm(measure.mm)));
+      if (measure.estimated) {
+        const mark = document.createElement('span');
+        mark.className = 'est-mark';
+        mark.textContent = t('est_short');
+        span.append(document.createTextNode(' '), mark);
+      }
     } else {
       span.classList.add('miss');
       span.append(document.createTextNode(reason(measure.reason)));
     }
-    span.title = t(route === 'landmark' ? 'method_landmark' : 'method_mask');
+    span.title = t(route === 'landmark' ? 'method_landmark' : 'method_mask')
+      + (measure.ok && measure.estimated ? ` · ${t('est_title')}` : '');
     foot.appendChild(span);
   }
 
@@ -1417,20 +1711,24 @@ function tileBadges(image) {
   if (landmarks.mirrored) badges.push({ text: t('badge_mirrored'), tone: 'warn', title: t('badge_mirrored_title') });
   const nipple = (image.polygons || {}).nipple;
   if (nipple && nipple.rescued) badges.push({ text: t('badge_rescued'), tone: 'warn', title: t('badge_rescued_title') });
+  if (nipple && nipple.brightened) {
+    badges.push({ text: t('badge_brightened'), tone: 'warn', title: t('badge_brightened_title') });
+  }
+  if (isEstimated(image)) badges.push({ text: t('badge_estimated'), tone: 'warn', title: t('badge_estimated_title') });
   return badges;
 }
 
 function renderRails(study) {
   const sides = new Map(((study.summary || {}).sides || []).map((side) => [side.laterality, side]));
-  const mloAlone = (laterality) => {
+  const mloQuality = (laterality) => {
     const image = study.images.find((entry) => entry.view === 'MLO' && entry.laterality === laterality);
-    return image && (image.criteria || []).find((item) => item.id === 'mlo_alone');
+    return image && (image.criteria || []).find((item) => item.id === 'mlo_quality');
   };
-  renderRail(ui.railR, 'R', sides.get('R'), mloAlone('R'));
-  renderRail(ui.railL, 'L', sides.get('L'), mloAlone('L'));
+  renderRail(ui.railR, 'R', sides.get('R'), mloQuality('R'));
+  renderRail(ui.railL, 'L', sides.get('L'), mloQuality('L'));
 }
 
-function renderRail(node, laterality, side, mloAlone) {
+function renderRail(node, laterality, side, mloQuality) {
   const head = document.createElement('div');
   head.className = 'rail-head';
   const name = document.createElement('span');
@@ -1460,16 +1758,16 @@ function renderRail(node, laterality, side, mloAlone) {
     buildVerdictCard(t('method_mask'), 'mask', side.mask),
     agreement,
   ];
-  if (mloAlone && mloAlone.value) {
-    // Information only: the MLO judged on its own (MLO-only criterion); it never changes the ΔD verdict above.
+  if (mloQuality) {
+    // The MLO judged on its own (MLO-only criterion): good, poor or n/a. It never changes the ΔD verdicts above.
     const line = document.createElement('p');
-    line.className = 'mlo-alone';
-    line.dataset.value = mloAlone.value;
-    line.title = criterionDetail(mloAlone);
+    line.className = 'mlo-quality';
+    line.dataset.grade = mloQuality.grade;
+    line.title = criterionDetail(mloQuality);
     const label = document.createElement('span');
-    label.textContent = t('mlo_alone_label');
+    label.textContent = t('mlo_quality_label');
     const value = document.createElement('strong');
-    value.textContent = criterionValue(mloAlone);
+    value.textContent = criterionValue(mloQuality);
     line.append(label, value);
     children.push(line);
   }
@@ -1511,7 +1809,7 @@ function buildVerdictCard(title, route, result) {
   const value = document.createElement('span');
   value.className = 'delta-value';
   value.dataset.verdict = result.verdict;
-  value.textContent = result.delta_mm.toFixed(1);
+  value.textContent = formatNumber(result.delta_mm);
   const unit = document.createElement('span');
   unit.className = 'delta-unit';
   unit.textContent = 'mm';
@@ -1522,19 +1820,34 @@ function buildVerdictCard(title, route, result) {
 
   const pairs = document.createElement('dl');
   pairs.className = 'pair';
-  for (const [term, description] of [
-    [t('pnl_mlo'), `${result.pnl_mm.toFixed(1)} mm`],
-    [t('wall_cc'), `${result.cc_mm.toFixed(1)} mm`],
-    [t('threshold'), `≤ ${result.threshold_mm} mm`],
+  const estimated = result.estimated || [];
+  for (const [term, description, view] of [
+    [t('pnl_mlo'), formatMm(result.pnl_mm), 'MLO'],
+    [t('wall_cc'), formatMm(result.cc_mm), 'CC'],
+    [t('threshold'), `≤ ${formatMm(result.threshold_mm, null)}`, ''],
   ]) {
     const dt = document.createElement('dt');
     dt.textContent = term;
     const dd = document.createElement('dd');
     dd.textContent = description;
+    if (view && estimated.includes(view)) {
+      const mark = document.createElement('span');
+      mark.className = 'est-mark';
+      mark.textContent = t('est_short');
+      mark.title = t('est_title');
+      dd.append(document.createTextNode(' '), mark);
+    }
     pairs.append(dt, dd);
   }
 
   card.append(delta, pairs);
+  if (estimated.length) {
+    // The verdict stands, and says what it rests on (the contour fallback).
+    const note = document.createElement('p');
+    note.className = 'card-estimated';
+    note.textContent = t('card_estimated', { views: estimated.join(' + ') });
+    card.appendChild(note);
+  }
   return card;
 }
 
@@ -1553,12 +1866,12 @@ function renderCriteria(study) {
     const image = study.images.find((entry) => entry.view_key === viewKey);
     if (image && (image.criteria || []).length) groups.push([viewKey, image.criteria]);
   }
-  const studyItems = (study.criteria || {}).study || [];
-  if (studyItems.length) groups.push([t('both_breasts'), studyItems]);
 
   const counts = summary.counts || {};
+  // Only the MLO quality is graded now, and it is good or poor: "acceptable" is named only if a study has one.
   ui.criteriaCounts.textContent = summary.graded
-    ? t('criteria_counts', { g: counts.good || 0, a: counts.acceptable || 0, p: counts.poor || 0 })
+    ? t(counts.acceptable ? 'criteria_counts' : 'criteria_counts_gp',
+      { g: counts.good || 0, a: counts.acceptable || 0, p: counts.poor || 0 })
     : '';
   ui.criteriaEmpty.hidden = groups.length > 0;
 
@@ -1575,6 +1888,7 @@ function renderCriteria(study) {
       const row = document.createElement('li');
       row.className = 'criterion';
       row.dataset.grade = item.grade;
+      row.dataset.criterion = item.id;
       const detail = criterionDetail(item);
       if (detail) row.title = detail;
 
@@ -1584,14 +1898,6 @@ function renderCriteria(study) {
       const name = document.createElement('span');
       name.className = 'criterion-name';
       name.append(document.createTextNode(criterionName(item)));
-
-      if (item.estimated) {
-        const mark = document.createElement('span');
-        mark.className = 'est-mark';
-        mark.textContent = t('est');
-        mark.title = t('est_title');
-        name.appendChild(mark);
-      }
 
       const value = document.createElement('span');
       value.className = 'criterion-value';
@@ -1605,11 +1911,12 @@ function renderCriteria(study) {
   }));
 }
 
-/** A criterion's value as shown: worded values (the MLO-alone verdict) are translated, numbers carry their unit. */
+/** A criterion's value as shown: worded values (the MLO quality) are translated, numbers carry their unit. */
 function criterionValue(item) {
   if (item.value === null || item.value === undefined) return gradeText(item.grade);
-  if (item.id === 'mlo_alone') return t(`mlo_alone_${item.value}`, {}, String(item.value));
-  return `${item.value}${item.unit}`;
+  if (item.id === 'mlo_quality') return t(`mlo_quality_${item.value}`, {}, String(item.value));
+  if (typeof item.value !== 'number') return `${item.value}${item.unit || ''}`;
+  return formatValue(item.value, item.unit); // with the criterion's own unit, whatever it is
 }
 
 /** The worst grade among a view's criteria, for the dot in its tile header. */
@@ -1808,8 +2115,8 @@ function renderLangSwitch() {
     button.textContent = name;
     button.addEventListener('click', () => {
       if (code === reportLanguage()) return;
-      state.reportLang = code;
-      savePref(REPORT_LANG_KEY, code);
+      state.reportLang = code; // for this session: the next start follows the interface language again
+      saveSessionPref(REPORT_LANG_KEY, code);
       loadReport();
     });
     return button;
@@ -1878,6 +2185,7 @@ function renderReport(report) {
       const line = document.createElement('div');
       line.className = 'report-row' + (row.strong ? ' strong' : '');
       if (row.grade) line.dataset.grade = row.grade;
+      if (row.criterion) line.dataset.criterion = row.criterion;
       const term = document.createElement('dt');
       term.textContent = row.label;
       const value = document.createElement('dd');
@@ -1940,8 +2248,7 @@ async function saveLabels() {
   if (!state.study) return;
   const button = el('editor-save');
   const payload = editor.payload();
-  if (!payload.images.length) { // nothing was changed
-    editor.dirty = false;
+  if (!payload.images.length) { // nothing differs from the loaded labels
     editor.close();
     return;
   }
@@ -1952,7 +2259,6 @@ async function saveLabels() {
   try {
     // The study the labels were loaded from, not whatever the page shows now.
     const updated = await api.putLabels(editor.studyId, payload);
-    editor.dirty = false;
     editor.close();
     await showStudy(updated);
     refreshHistory();
@@ -1968,10 +2274,16 @@ async function saveLabels() {
 }
 
 // ── history ────────────────────────────────────────────────────────────────
+let historyAsked = 0;
+
 async function refreshHistory() {
+  historyAsked += 1;
+  const asked = historyAsked;
   try {
-    const { studies } = await api.listStudies();
+    const { studies, unopened } = await api.listStudies();
+    if (asked !== historyAsked) return; // a newer listing is on its way: this one may already be out of date
     state.history = studies;
+    state.historyUnopened = unopened || 0;
     renderHistory(studies);
   } catch (error) {
     showError(error.message);
@@ -1980,6 +2292,9 @@ async function refreshHistory() {
 
 function renderHistory(studies) {
   ui.recentEmpty.hidden = studies.length > 0;
+  // Studies a dataset analysed ahead are stored but not listed until somebody opens them.
+  ui.recentEmpty.textContent = state.historyUnopened
+    ? t('no_recent_opened', { k: state.historyUnopened }) : t('no_recent');
   ui.history.replaceChildren(...studies.map(buildHistoryItem));
 }
 
@@ -2002,24 +2317,47 @@ function buildHistoryItem(row) {
   const views = document.createElement('span');
   views.className = 'history-views';
   views.textContent = (row.views || []).join('  ') || t('views_n', { n: row.images });
-  body.appendChild(views);
+  const label = document.createElement('span');
+  label.className = 'history-label';
+  label.textContent = String(row.id || '').slice(0, 6); // the same id the review footer shows
+  body.append(views, label);
 
   button.append(dot, body);
-  if (row.flagged) {
+  // ▲ only when the two methods reach different verdicts; a wide gap under the same verdict and a single method
+  // get their own quieter marks (older servers send only "flagged").
+  const kind = row.flag !== undefined ? row.flag : (row.flagged ? 'disagree' : null);
+  const marks = { disagree: ['▲', 'flag_title'], wide: ['≈', 'flag_wide_title'], partial: ['–', 'flag_partial_title'] };
+  if (marks[kind]) {
     const flag = document.createElement('span');
     flag.className = 'history-flag';
-    flag.textContent = '▲';
-    flag.title = t('flag_title');
+    flag.dataset.kind = kind;
+    flag.textContent = marks[kind][0];
+    flag.title = t(marks[kind][1]);
     button.appendChild(flag);
   }
   const time = document.createElement('span');
   time.className = 'history-time';
-  time.textContent = formatTime(row.created);
+  time.textContent = formatDateTime(row.created);
   button.appendChild(time);
 
-  button.addEventListener('click', () => openStudy(row.id));
+  button.addEventListener('click', () => openStored(row.id));
   item.appendChild(button);
   return item;
+}
+
+/**
+ * Open a stored study the reader picked on its own: a row of the recent list, or an address. With a dataset open
+ * its bar must not stay on another study: a study of the dataset is gone to through the dataset (the bar moves to
+ * it, and it is marked as opened there), any other study leaves the dataset, as a single upload and "New study" do.
+ */
+function openStored(studyId) {
+  const dataset = state.dataset;
+  if (!dataset) return openStudy(studyId);
+  if (state.busy) { showError(t('busy_wait')); return Promise.resolve({ ok: false }); } // nothing is left for nothing
+  const held = [...dataset.ids].find(([, id]) => id === studyId);
+  if (held) return goToStudy(held[0]);
+  closeDataset();
+  return openStudy(studyId);
 }
 
 /**
@@ -2038,6 +2376,8 @@ async function openStudy(studyId, { signal } = {}) {
     ui.progressText.textContent = t('loading_views');
     state.bitmaps.clear();
     const shown = await showStudy(study, signal);
+    // On screen for review, by whatever route (dataset, recent list, address): the server lists it from now on.
+    if (shown) api.markOpened(study.id).catch(() => {});
     return shown ? { ok: true } : { ok: false, aborted: true };
   } catch (error) {
     const aborted = Boolean(signal && signal.aborted);

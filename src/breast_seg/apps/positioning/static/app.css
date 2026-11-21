@@ -482,5 +482,12 @@ html[data-bs-theme=dark] .banner[data-tone="info"] { background: rgba(63, 182, 1
 
 /* ── editor: hidden contours, toggle state ── */
 .class-row.hidden-class .swatch { opacity: .35; }
+.class-item { display: flex; align-items: center; gap: .25rem; }
+.class-item .class-row { flex: 1; min-width: 0; }
+.class-eye { flex: none; width: 28px; height: 28px; display: grid; place-items: center; border: 1px solid transparent;
+  border-radius: 6px; background: none; color: var(--brand-ink-2, inherit); cursor: pointer; padding: 0; }
+.class-eye svg { width: 16px; height: 16px; }
+.class-eye:hover { background: var(--brand-surface-3); }
+.class-eye.off { color: var(--brand-ink-3); opacity: .7; }
 .class-row.hidden-class .class-name { color: var(--brand-ink-3); }
 #editor-hide.on { border-color: var(--brand-teal); background: var(--brand-teal-soft); }

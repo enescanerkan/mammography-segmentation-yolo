@@ -39,6 +39,9 @@ const TOOLS = [
 // The review screen's layer (overlay.js LAYERS) that shows each contour class.
 export const LAYER_OF = { 'breast-tissue': 'breast', pectoral: 'pectoral', nipple: 'nipple' };
 
+const EYE_OPEN = '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M1 8s2.6-5 7-5 7 5 7 5-2.6 5-7 5-7-5-7-5z" fill="none" stroke="currentColor" stroke-width="1.4"/><circle cx="8" cy="8" r="2.2" fill="currentColor"/></svg>';
+const EYE_SHUT = '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M1 8s2.6-5 7-5 7 5 7 5-2.6 5-7 5-7-5-7-5z" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M2.5 13.5l11-11" stroke="currentColor" stroke-width="1.4"/></svg>';
+
 const clamp = (value, low, high) => Math.min(Math.max(value, low), high);
 const classById = (id) => CLASSES.find((entry) => entry.id === id);
 const styleKey = (entry) => entry.style || entry.key || entry.label || entry.id;
@@ -163,6 +166,16 @@ export class Editor {
   /** No contour is drawn: the toggle offers to show them. */
   get contoursHidden() {
     return Object.keys(LAYER_OF).every((classId) => !this.shown(classId));
+  }
+
+  /** One class's contour on or off; a single change ends what "Hide contours" would restore. */
+  toggleContour(classId) {
+    if (!(classId in LAYER_OF)) return;
+    this.layers.set([LAYER_OF[classId]], !this.shown(classId));
+    this.hiddenByToggle = null;
+    if (this.draft && this.draft.classId === classId) this.draft = null;
+    this.drag = null;
+    if (this.open) { this._renderRail(); this.render(); }
   }
 
   /** "Hide contours" / "Show contours": switch the three contour layers off, or back to what was on. */
@@ -318,6 +331,21 @@ export class Editor {
     row.append(swatch, name, state);
     row.addEventListener('click', () => this._setClass(entry.id));
     item.appendChild(row);
+
+    if (entry.id in LAYER_OF) {
+      // One contour on or off (the review layer of that class); "Hide contours" still switches all three.
+      const shown = this.shown(entry.id);
+      const eye = document.createElement('button');
+      eye.type = 'button';
+      eye.className = 'class-eye' + (shown ? '' : ' off');
+      eye.setAttribute('aria-pressed', String(!shown));
+      eye.title = t(shown ? 'ed_hide_one' : 'ed_show_one', { name: nameOf(entry) });
+      eye.setAttribute('aria-label', eye.title);
+      eye.innerHTML = shown ? EYE_OPEN : EYE_SHUT;
+      eye.addEventListener('click', () => this.toggleContour(entry.id));
+      item.classList.add('class-item');
+      item.appendChild(eye);
+    }
 
     return item;
   }

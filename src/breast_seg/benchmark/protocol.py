@@ -6,7 +6,9 @@ the pinning (``os.sched_setaffinity`` acts on the calling thread and the threads
 
 * **CPU cores.** The ``threads`` physical cores with the lowest load over a short ``/proc/stat`` sample (load of a
   core = sum over its SMT siblings), one logical CPU of each; the process is pinned to them for the whole session
-  and runs that many threads.
+  and runs exactly as many threads as it has cores (explicit cores set the thread count; fewer free cores lower it).
+* **GPU.** A GPU index is the one nvidia-smi shows (``CUDA_DEVICE_ORDER=PCI_BUS_ID``); the guard watches the card
+  torch actually uses and refuses a ``CUDA_VISIBLE_DEVICES`` that names another card for nvidia-smi.
 * **Order.** A fixed random base order of the configurations (``numpy.random.default_rng(seed).permutation``),
   rotated by one position per job, so whatever else the machine does hits every configuration alike. Jobs are the
   warm-up pairs, then every pair once per pass.
@@ -200,39 +202,62 @@ def parse_device(device: str) -> Tuple[bool, Optional[str]]:
     raise ValueError(f"device must be cpu, cuda, a GPU index or cuda:<index>, not {device!r}")
 
 
+def choose_cores(threads: int, cores: Optional[Sequence[int]], sampling_s: float,
+                 select: Callable[[int, float], Tuple[List[int], Dict[str, Any]]] = select_cores,
+                 can_pin: Optional[bool] = None) -> Tuple[List[int], Dict[str, Any], int]:
+    """``(logical CPUs to pin to, record, threads)``: threads always equal the number of pinned cores.
+
+    Explicit ``cores`` give the thread count. Fewer free physical cores than ``threads`` lower the thread count
+    (recorded). Without pinning support (not Linux) nothing is pinned and ``threads`` stays.
+    """
+    if can_pin is None:
+        can_pin = hasattr(os, "sched_setaffinity")
+    if not can_pin:
+        return [], {"note": "this platform cannot pin a process to cores; not pinned"}, threads
+    if cores:
+        chosen = sorted({int(c) for c in cores})
+        return chosen, {"explicit": True}, len(chosen)
+    chosen, info = select(threads, sampling_s)
+    if not chosen:
+        return [], dict(info, note="no core found; not pinned"), threads
+    if len(chosen) < threads:
+        info.update(threads_requested=threads, threads_lowered_to=len(chosen))
+    return chosen, info, len(chosen)
+
+
 def prepare_process(device: str, threads: int, cores: Optional[Sequence[int]] = None, sampling_s: float = 5.0,
                     smi: Smi = run_nvidia_smi) -> Dict[str, Any]:
     """Pin this process and set its thread / device variables; call it before numpy, OpenCV or torch is imported.
 
-    Returns the record stored in the session file (start snapshot, pinned CPUs and how they were chosen, whether a
+    A GPU index is a physical index as nvidia-smi lists it: ``CUDA_DEVICE_ORDER=PCI_BUS_ID`` is set with
+    ``CUDA_VISIBLE_DEVICES`` (unless the environment already chose an order). Returns the record stored in the
+    session file (start snapshot, pinned CPUs and how they were chosen, the thread count actually used, whether a
     threaded library was already loaded, the device variables).
     """
     gpu, index = parse_device(device)
     preloaded = sorted(m for m in THREADED_MODULES if m in sys.modules)
     start = machine_snapshot(smi)
-    if not hasattr(os, "sched_setaffinity"):  # not Linux: threads are set, the process is not pinned
-        chosen, info = [], {"note": "this platform cannot pin a process to cores; not pinned"}
-    elif cores:
-        chosen, info = sorted(int(c) for c in cores), {"explicit": True}
-    else:
-        chosen, info = select_cores(threads, sampling_s)
+    chosen, info, threads = choose_cores(threads, cores, sampling_s)
     if chosen:
         os.sched_setaffinity(0, chosen)
     previous = os.environ.get("CUDA_VISIBLE_DEVICES")
     if not gpu:
         os.environ["CUDA_VISIBLE_DEVICES"] = ""
-    elif index is not None:
-        os.environ["CUDA_VISIBLE_DEVICES"] = index
+    else:
+        os.environ.setdefault("CUDA_DEVICE_ORDER", "PCI_BUS_ID")
+        if index is not None:
+            os.environ["CUDA_VISIBLE_DEVICES"] = index
     for k in THREAD_ENV:
         os.environ[k] = str(threads)
     os.environ["YOLO_VERBOSE"] = "False"
-    print("pinned to logical CPUs", chosen, info, flush=True)
+    print("pinned to logical CPUs", chosen, info, f"threads {threads}", flush=True)
     if preloaded:
         print(f"warning: {preloaded} imported before pinning; their thread pools may run outside the pinned cores",
               flush=True)
-    return {"start": start, "pinned_cpus": chosen, "core_choice": info, "preloaded_before_pinning": preloaded,
-            "gpu": gpu, "cuda_visible_devices": os.environ.get("CUDA_VISIBLE_DEVICES"),
-            "cuda_visible_devices_before": previous}
+    return {"start": start, "pinned_cpus": chosen, "core_choice": info, "threads": threads,
+            "preloaded_before_pinning": preloaded, "gpu": gpu,
+            "cuda_visible_devices": os.environ.get("CUDA_VISIBLE_DEVICES"), "cuda_visible_devices_before": previous,
+            "cuda_device_order": os.environ.get("CUDA_DEVICE_ORDER") if gpu else None}
 
 
 # ── jobs and order ────────────────────────────────────────────────────────────────────────────────────────────
@@ -284,18 +309,18 @@ class GpuGuard:
         for line in smi("--query-gpu=index,uuid"):
             idx, _, uid = line.partition(",")
             known[idx.strip()] = uid.strip()
+        first = (visible or "").split(",")[0].strip()
+        by_visible = first if first.startswith("GPU-") else known.get(first or "0")
         if torch_uuid and torch_uuid in known.values():
+            if first and by_visible and by_visible != torch_uuid:
+                raise RuntimeError(f"CUDA_VISIBLE_DEVICES={visible!r} is {by_visible} for nvidia-smi but {torch_uuid} "
+                                   "for CUDA: set CUDA_DEVICE_ORDER=PCI_BUS_ID so both count the cards alike")
             uuid, source = torch_uuid, "torch"
+        elif by_visible:
+            uuid, source = by_visible, "CUDA_VISIBLE_DEVICES"
         else:
-            first = (visible or "").split(",")[0].strip() or "0"
-            if first.startswith("GPU-"):
-                uuid = first
-            elif first in known:
-                uuid = known[first]
-            else:
-                raise RuntimeError(f"cannot identify the GPU (CUDA_VISIBLE_DEVICES={visible!r}; nvidia-smi lists "
-                                   f"{sorted(known)})")
-            source = "CUDA_VISIBLE_DEVICES"
+            raise RuntimeError(f"cannot identify the GPU (CUDA_VISIBLE_DEVICES={visible!r}; nvidia-smi lists "
+                               f"{sorted(known)})")
         return cls(uuid, allowed_pids, smi, own_pid, uuid_from=source, visible=visible or "", name=name)
 
     def processes(self) -> List[Dict[str, Any]]:

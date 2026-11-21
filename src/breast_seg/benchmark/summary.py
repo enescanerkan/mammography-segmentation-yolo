@@ -8,12 +8,19 @@ Definitions (one measurement = one pair through one configuration, warm-up exclu
 * **disturbed pass**: more than 5 % of its measurements take longer than 1.5 x the median of the same
   configuration in the same session (:func:`disturbed_passes`). Something else on the machine slowed the pass down
   (pinning keeps this process on its cores, not other processes off them).
-* **composed result** (:func:`compose`): the undisturbed passes of several sessions with the same settings, in time
-  order, renumbered 1..n, every aggregate recomputed with the definitions above. Outputs (ΔD, decisions) do not
-  depend on timing, so their checks come from the first session whose pass 1 is kept.
+* **composed result** (:func:`compose`): the undisturbed passes of several sessions with the same settings (device,
+  threads, batching, preprocessing, warm-up and pair set), in time order, renumbered 1..n. Every timing number is
+  recomputed from the kept passes with the definitions above (seconds per pair, pairs per minute, passes, spread,
+  peak GPU memory, batching speed-ups, differences between passes); model load times are dropped. Outputs (ΔD,
+  decisions) do not depend on timing, so the checks against stored predictions and the accuracy come from the first
+  session whose pass 1 is kept.
+
+Rows of a configuration that was dropped after an error stay in the per-pair CSV but enter no summary (they are
+counted under ``rows_ignored``).
 """
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
@@ -131,19 +138,30 @@ def output_summary(t: pd.DataFrame, family: str, reference: Optional[pd.Series] 
     k = _delta_by_pair(first)
     out: Dict[str, Any] = {"n_pairs": int(first["pair"].nunique()), "check": None, "accuracy": None,
                            "accuracy_stored": None, "nipple_source": None}
+    stored_ok = False
     if stored is not None:
-        out["check"] = stored_check(k, stored[0], stored[1], int((first["decision"] == "no measurement").sum()))
+        try:
+            out["check"] = stored_check(k, stored[0], stored[1], int((first["decision"] == "no measurement").sum()))
+            stored_ok = True
+        except Exception as exc:  # noqa: BLE001 - a broken reference must not cost the timing session
+            out["check"] = {"reference": stored[1], "failed": True, "error": f"{type(exc).__name__}: {exc}"}
     if reference is not None and reference.notna().any():
         out["accuracy"] = accuracy(k, reference)
-        if stored is not None and family != "craunet":
+        if stored_ok and family != "craunet":
             out["accuracy_stored"] = accuracy(stored[0].reindex(k.index), reference)
     if family != "craunet":
         out["nipple_source"] = {v: {str(a): int(b) for a, b in first[c].fillna("").value_counts().items()}
                                 for v, c in (("MLO", "nipple_source_mlo"), ("CC", "nipple_source_cc"))}
-    deltas = [(_delta_by_pair(g) - k).abs().dropna() for p, g in t.groupby("pass") if p != first["pass"].iloc[0]]
-    out["pass_max_abs_delta_diff_mm"] = (max((float(d.max()) for d in deltas if len(d)), default=0.0)
-                                         if deltas else None)
+    out["pass_max_abs_delta_diff_mm"] = pass_delta_diff(t)
     return out
+
+
+def pass_delta_diff(t: pd.DataFrame) -> Optional[float]:
+    """Largest |ΔD| difference of a later pass from the first one (None with one pass)."""
+    first = t[t["pass"] == t["pass"].min()]
+    k = _delta_by_pair(first)
+    deltas = [(_delta_by_pair(g) - k).abs().dropna() for p, g in t.groupby("pass") if p != first["pass"].iloc[0]]
+    return max((float(d.max()) for d in deltas if len(d)), default=0.0) if deltas else None
 
 
 def batching_comparison(t: pd.DataFrame, batched: str, unbatched: str, summary: Mapping[str, Any]) -> Dict[str, Any]:
@@ -160,14 +178,22 @@ def batching_comparison(t: pd.DataFrame, batched: str, unbatched: str, summary: 
 
 
 def session_flags(configurations: Mapping[str, Mapping[str, Any]]) -> Dict[str, Any]:
-    differ = {}
+    differ, failed = {}, []
     for name, o in configurations.items():
         ch = o.get("check")
-        if ch and ch["decision_flips"] + ch["measurement_only_on_one_side"] > 0:
+        if ch and ch.get("failed"):
+            failed.append(name)
+        elif ch and ch["decision_flips"] + ch["measurement_only_on_one_side"] > 0:
             differ[name] = ch["decision_flips"] + ch["measurement_only_on_one_side"]
-    return {"decisions_differ_from_stored": differ,
+    return {"decisions_differ_from_stored": differ, "stored_checks_failed": failed,
             "passes_disagree_over_10pct": {a: o["pass_spread_pct"] for a, o in configurations.items()
                                            if o.get("passes_disagree")}}
+
+
+def pair_set_hash(t: pd.DataFrame) -> str:
+    """SHA-256 of the session's pair keys (sorted ``study,side`` lines)."""
+    keys = sorted({f"{a},{b}" for a, b in zip(t["study"].astype(str), t["side"].astype(str))})
+    return hashlib.sha256("\n".join(keys).encode()).hexdigest()
 
 
 def load1_by_pass(t: pd.DataFrame) -> Dict[str, Dict[str, float]]:
@@ -187,28 +213,38 @@ def load_session(json_path: Path) -> Tuple[Dict[str, Any], pd.DataFrame]:
     return data, pd.read_csv(json_path.with_suffix(".csv"), dtype={"study": str, "side": str})
 
 
-_SAME = ("kind", "threads", "batched", "preprocessing")
+_SAME = ("kind", "device", "threads", "batched", "preprocessing", "warmup_pairs", "n_pairs")
 
 
 def compose(sessions: Sequence[Tuple[str, Dict[str, Any], pd.DataFrame]]) -> Tuple[Dict[str, Any], pd.DataFrame]:
-    """One result from the undisturbed passes of several sessions (``(label, json, rows)``, in time order)."""
+    """One result from the undisturbed passes of several sessions (``(label, json, rows)``, in time order; labels
+    unique). The sessions must agree in device, threads, batching, preprocessing, warm-up, configurations and pairs."""
     if not sessions:
         raise ValueError("no session to compose")
+    if len({label for label, _, _ in sessions}) != len(sessions):
+        raise ValueError("session labels are not unique")
     first = sessions[0][1]
     for label, s, _ in sessions[1:]:
         for k in _SAME:
             if s["session"].get(k) != first["session"].get(k):
-                raise ValueError(f"{label}: {k} = {s['session'].get(k)!r} differs from {first['session'].get(k)!r}")
+                raise ValueError(f"{label}: {k} = {s['session'].get(k)!r} differs from {first['session'].get(k)!r} "
+                                 f"in {sessions[0][0]}")
         if sorted(s["configurations"]) != sorted(first["configurations"]):
-            raise ValueError(f"{label}: other configurations than the first session")
-    passes, kept = [], []
-    for label, _, rows in sessions:
-        t = measured(rows).copy()
+            raise ValueError(f"{label}: other configurations than {sessions[0][0]}")
+    passes, kept, ignored, hashes = [], [], {}, {}
+    for label, js, rows in sessions:
+        known = rows["configuration"].isin(list(js["configurations"]))
+        if (~known).any():  # a configuration dropped after an error: its rows (warm-up incl.) are in the CSV only
+            ignored[label] = {str(c): int(n) for c, n in rows.loc[~known, "configuration"].value_counts().items()}
+        t = measured(rows[known]).copy()
+        hashes[label] = pair_set_hash(t)
         for p in disturbed_passes(t, label):
             passes.append(p)
             if not p["disturbed"]:
                 kept.append(t[t["pass"] == p["pass"]].assign(source=f"{label} pass {p['pass']}",
                                                              source_session=label, source_pass=p["pass"]))
+    if len(set(hashes.values())) > 1:
+        raise ValueError(f"the sessions measured different pairs (pair-set SHA-256 {hashes})")
     if not kept:
         raise ValueError("every pass of every session is disturbed: nothing to compose")
     T = pd.concat(kept, ignore_index=True)
@@ -217,10 +253,21 @@ def compose(sessions: Sequence[Tuple[str, Dict[str, Any], pd.DataFrame]]) -> Tup
     checked = next((p["session"] for p in passes if not p["disturbed"] and p["pass"] == 1), sessions[0][0])
     base = next(s for label, s, _ in sessions if label == checked)
     configurations = {}
-    for name, t in T.groupby("configuration"):
+    for name in base["configurations"]:  # the session's order
+        t = T[T["configuration"] == name]
+        if t.empty:
+            continue
         o = dict(base["configurations"][name])
+        o.pop("model_load_s", None)  # one session's load time, not a property of the composed passes
         o.update(timing_summary(t))
+        o["pass_max_abs_delta_diff_mm"] = pass_delta_diff(t)
+        if o.get("peak_extra_MB") is not None:  # from the kept measurements (no warm-up pairs)
+            o["peak_extra_MB"] = float(t["gpu_extra_MB"].max())
+            o["peak_gpu_MB"] = float((o.get("model_gpu_MB") or 0.0) + o["peak_extra_MB"])
         configurations[name] = o
+    comparisons = {f"{c[:-len('_unbatched')]}_vs_unbatched": batching_comparison(T, c[:-len("_unbatched")], c,
+                                                                                 configurations)
+                   for c in configurations if c.endswith("_unbatched") and c[:-len("_unbatched")] in configurations}
     s0, s1 = sessions[0][1]["session"], sessions[-1][1]["session"]
     se = dict(s1)
     se.update(start=s0["start"], end=s1["end"], wall_s=float(T["total_s"].sum()), passes=len(order),
@@ -228,12 +275,17 @@ def compose(sessions: Sequence[Tuple[str, Dict[str, Any], pd.DataFrame]]) -> Tup
               load1_during={"median": float(T["load1"].median()), "min": float(T["load1"].min()),
                             "max": float(T["load1"].max())},
               load1_by_pass=load1_by_pass(T),
+              pairs_sha256=next(iter(hashes.values())),
               composed={"rule": DISTURBED_RULE + "; the undisturbed passes are kept, in time order",
-                        "sources": [label for label, _, _ in sessions], "passes": passes, "outputs_checked_in": checked})
+                        "sources": [label for label, _, _ in sessions], "passes": passes, "outputs_checked_in": checked,
+                        "rows_ignored": ignored,
+                        "recomputed": "every timing number from the kept passes (incl. peak GPU memory without the "
+                                      "warm-up pairs and the batching speed-ups); model load times dropped; output "
+                                      "checks from outputs_checked_in"})
     out = dict(sessions[-1][1])
-    out.update(session=se, configurations=configurations, disturbed_passes=passes, card=None,
-               comparisons=base.get("comparisons"), **session_flags(configurations))
-    out["decisions_differ_from_stored"] = base.get("decisions_differ_from_stored")
+    out.update(session=se, configurations=configurations, disturbed_passes=passes, card=None, comparisons=comparisons,
+               **session_flags(configurations))
+    out["errors"], out["rows_ignored"] = {}, {}
     return out, T.drop(columns=["source_session", "source_pass"])
 
 
@@ -271,6 +323,10 @@ def report_markdown(results: Sequence[Tuple[str, Dict[str, Any]]]) -> str:
             L.append(f"- Skipped: {s['skipped']}.")
         if s.get("errors"):
             L.append(f"- **Errors**: {list(s['errors'])}.")
+        if s.get("stored_checks_failed"):
+            L.append(f"- **Stored check failed** for {s['stored_checks_failed']} (see `check.error` in the JSON).")
+        if s.get("rows_ignored"):
+            L.append(f"- Rows of configurations dropped after an error, not summarised: {s['rows_ignored']}.")
         if s.get("decisions_differ_from_stored"):
             L.append(f"- Decisions differing from the stored predictions (pairs): {s['decisions_differ_from_stored']}.")
         if s.get("passes_disagree_over_10pct"):

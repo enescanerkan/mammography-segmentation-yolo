@@ -82,6 +82,9 @@ class RuntimeConfig:
     allowed_pids: List[int] = field(default_factory=list)
     batched: bool = True
     flops: bool = True
+    #: False (the paper): SegFormer and U-Net run in float32 on the CPU. True: their training config's autocast
+    #: dtype on the CPU as well, as the trainers' ``predict`` does.
+    cpu_autocast: bool = False
 
     def __post_init__(self) -> None:
         if CRAUNET in self.pipelines:
@@ -190,20 +193,44 @@ def read_pairs(path: Path, dicom_root: Optional[Path] = None, first: int = 0) ->
     return pairs
 
 
-def load_stored(path: Path, fold: Optional[int] = None):
-    """Stored per-pair results of one model (``study`` or ``StudyInstanceUID``, ``side``, ``delta_mm`` or
-    ``delta``) as a series indexed by (study, side). With a ``fold`` column and ``fold`` given, only that fold's
-    rows (CRAUNet's per-case table lists every fold's test pairs, each from its own fold's model)."""
+def read_stored(path: Path, fold: Optional[int] = None) -> Dict[Tuple[str, str], float]:
+    """Stored per-pair results of one model: ``(study, side) -> ΔD`` from a CSV with ``study`` (or
+    ``StudyInstanceUID``), ``side`` and ``delta_mm`` (or ``delta``); sides are upper-cased as in the pairs file and
+    an empty ΔD is no measurement. With a ``fold`` column and ``fold`` given, only that fold's rows (CRAUNet's
+    per-case table lists every fold's test pairs, each from its own fold's model). Duplicate pairs are an error."""
+    path = Path(path)
+    with open(path, newline="") as fh:
+        rows = list(csv.DictReader(fh))
+    cols = set(rows[0]) if rows else set()
+    study = next((c for c in ("study", "StudyInstanceUID") if c in cols), None)
+    delta = next((c for c in ("delta_mm", "delta") if c in cols), None)
+    if study is None or delta is None or "side" not in cols:
+        raise ConfigError(f"{path.name}: needs study (or StudyInstanceUID), side and delta_mm (or delta)")
+    out: Dict[Tuple[str, str], float] = {}
+    duplicates = []
+    for r in rows:
+        if fold is not None and "fold" in cols and str(r["fold"]).strip() != str(fold):
+            continue
+        key = (str(r[study]).strip(), str(r["side"]).strip().upper())
+        if key in out:
+            duplicates.append(key)
+        value = str(r[delta]).strip()
+        try:
+            out[key] = float(value) if value and value.lower() != "nan" else float("nan")
+        except ValueError:
+            raise ConfigError(f"{path.name}: ΔD {value!r} of {key} is not a number") from None
+    if duplicates:
+        raise ConfigError(f"{path.name}: {len(duplicates)} duplicate (study, side) row(s), e.g. {duplicates[:2]}")
+    return out
+
+
+def stored_series(values: Mapping[Tuple[str, str], float]):
+    """:func:`read_stored` as a series indexed by (study, side)."""
     import pandas as pd
 
-    d = pd.read_csv(path, dtype={"study": str, "StudyInstanceUID": str, "side": str})
-    study = next((c for c in ("study", "StudyInstanceUID") if c in d), None)
-    delta = next((c for c in ("delta_mm", "delta") if c in d), None)
-    if study is None or delta is None or "side" not in d:
-        raise ConfigError(f"{Path(path).name}: needs study (or StudyInstanceUID), side and delta_mm (or delta)")
-    if fold is not None and "fold" in d:
-        d = d[d["fold"] == fold]
-    return d.set_index([study, "side"])[delta].astype(float).rename_axis(["study", "side"])
+    index = pd.MultiIndex.from_tuples(list(values), names=["study", "side"]) if values else \
+        pd.MultiIndex.from_tuples([], names=["study", "side"])
+    return pd.Series(list(values.values()), index=index, dtype=float)
 
 
 # ── session ───────────────────────────────────────────────────────────────────────────────────────────────────
@@ -282,11 +309,7 @@ class Session:
 
         Raises :class:`InvalidMeasurement` (after writing ``<name>_INVALID_<time>.json``) when the GPU guard fires.
         """
-        import numpy as np
-        import pandas as pd
-
-        from breast_seg.benchmark import summary as S
-        from breast_seg.benchmark.pipelines import decide, describe
+        from breast_seg.benchmark.pipelines import decide
 
         warnings.simplefilter("ignore")
         cfg, dev, gpu = self.cfg, self.device, self.device.gpu
@@ -367,8 +390,36 @@ class Session:
 
         self.out_dir.mkdir(parents=True, exist_ok=True)
         csv_path, json_path = self.out_dir / f"{self.name}.csv", self.out_dir / f"{self.name}.json"
+        for old in (json_path, csv_path):  # an overwritten session never leaves a new CSV next to an old JSON
+            if old.exists():
+                old.unlink()
         _write_csv(csv_path, rows)
+        try:
+            summary = self._summary(csv_path, rows, models, errors, base, wall, end)
+        except Exception:
+            json_path.write_text(json.dumps(
+                {"valid": False, "reason": "the summary of the measurements failed", "detail": traceback.format_exc(),
+                 "csv": csv_path.name, "start": self.setup.get("start"), "end": end, "command": self.command},
+                indent=1, default=str))
+            raise
+        json_path.write_text(json.dumps(summary, indent=1, default=str))
+        return summary, 3 if errors else 0
+
+    def _summary(self, csv_path: Path, rows: List[Dict[str, Any]], models: Mapping[str, Dict[str, Any]],
+                 errors: Mapping[str, str], base: List[str], wall: float, end: Mapping[str, Any]) -> Dict[str, Any]:
+        import numpy as np
+        import pandas as pd
+
+        from breast_seg.benchmark import summary as S
+        from breast_seg.benchmark.pipelines import describe
+
+        cfg, dev, gpu = self.cfg, self.device, self.device.gpu
         R = pd.read_csv(csv_path, dtype={"study": str, "side": str}) if rows else pd.DataFrame(columns=_COLUMNS)
+        ok = [c for c in self.configurations if c not in errors]
+        # rows of a configuration dropped after an error stay in the CSV but enter no summary (disturbed passes incl.)
+        dropped = R[~R["configuration"].isin(ok)]
+        rows_ignored = {str(c): int(n) for c, n in dropped["configuration"].value_counts().items()}
+        R = R[R["configuration"].isin(ok)]
         T = S.measured(R)
         reference = pd.Series({(p.study, p.side): p.reference_delta_mm for p in self.pairs}, dtype=float)
         reference.index.names = ["study", "side"]
@@ -390,7 +441,7 @@ class Session:
         comparisons = {f"{c[:-len(UNBATCHED)]}_vs_unbatched": S.batching_comparison(T, c[:-len(UNBATCHED)], c, configurations)
                        for c in configurations if c.endswith(UNBATCHED) and c[:-len(UNBATCHED)] in configurations}
         torch_version, cudnn_benchmark = _torch_facts()
-        summary = {
+        return {
             "valid": True,
             "session": {
                 "device": dev.name, "kind": "gpu" if gpu else "cpu", "threads": cfg.threads,
@@ -405,6 +456,8 @@ class Session:
                 "order": "fixed random base order of the configurations, rotated by one per pair; warm-up pairs, then "
                          "every pair once per pass",
                 "base_order": base, "batched": cfg.batched, "preprocessing": "released",
+                "precision": {c: o.get("precision") for c, o in configurations.items()},
+                "cpu_autocast": cfg.cpu_autocast, "pairs_sha256": S.pair_set_hash(T),
                 "torch": torch_version, "numpy": np.__version__, "python": sys.version.split()[0],
                 "command": self.command},
             "card": self.guard.info if self.guard is not None else None,
@@ -418,10 +471,9 @@ class Session:
             "disturbed_rule": S.DISTURBED_RULE,
             **S.session_flags(configurations),
             "skipped": self.skipped,
-            "errors": errors,
+            "errors": dict(errors),
+            "rows_ignored": rows_ignored,
         }
-        json_path.write_text(json.dumps(summary, indent=1, default=str))
-        return summary, 3 if errors else 0
 
 
 def _torch_facts() -> Tuple[Optional[str], Optional[bool]]:
@@ -460,6 +512,8 @@ def _apply_flags(cfg: RuntimeConfig, args: Any) -> RuntimeConfig:
         changes["batched"] = False
     if getattr(args, "no_flops", False):
         changes["flops"] = False
+    if getattr(args, "cpu_autocast", False):
+        changes["cpu_autocast"] = True
     if getattr(args, "allowed_pids", None):
         changes["allowed_pids"] = protocol.allowed_pid_list(args.allowed_pids)
     cra = cfg.craunet
@@ -508,7 +562,7 @@ def build_pipelines(cfg: RuntimeConfig, config_dir: Path, paths: PathsConfig, ne
         check = path / f"fold_{trainer.config.fold}" / trainer.config.checkpoint if family == "nnunet" else path
         if not check.exists():
             missing.append(f"{name}: {check}")
-        out[name] = FAMILIES[family](name, trainer, path, device, cfg.flops)
+        out[name] = FAMILIES[family](name, trainer, path, device, cfg.flops, cfg.cpu_autocast)
     if missing:
         raise FileNotFoundError("weights / code not found: " + "; ".join(missing))
     return out
@@ -534,15 +588,30 @@ def run_cli(args: Any) -> int:
     unknown = sorted((set(weights) | set(stored_files)) - in_use)
     if unknown:
         raise ConfigError(f"--weights / --stored name pipelines that do not run: {unknown} (running: {sorted(in_use)})")
+    cores = sorted({int(c) for c in args.cores.split(",") if c.strip()}) if args.cores else None
+    if cores:  # threads = pinned cores
+        if args.threads is not None and args.threads != len(cores):
+            raise ConfigError(f"--threads {args.threads} but {len(cores)} --cores: they must be equal")
+        cfg = replace(cfg, threads=len(cores))
     pairs = read_pairs(Path(args.pairs), Path(args.dicom_root) if args.dicom_root else None, args.first or 0)
+    keys = {(p.study, p.side) for p in pairs}
+    stored_values = {}
+    for p, f in stored_files.items():
+        stored_values[p] = read_stored(Path(f), cfg.craunet.fold if p == CRAUNET else None)
+        n = len(keys & set(stored_values[p]))
+        print(f"stored results of {p}: {n} of {len(pairs)} pairs found in {Path(f).name}", flush=True)
+        if n == 0:
+            print(f"warning: no pair of the session is in {Path(f).name}; its check will compare nothing", flush=True)
     out_dir = Path(args.out) if args.out else paths.dir("results_dir") / "runtime"
     name = args.name or f"runtime_{'gpu' if gpu else 'cpu'}" + (f"_first{args.first}" if args.first else "")
     if (out_dir / f"{name}.json").exists() and not args.overwrite:
         raise ConfigError(f"{name}.json exists in {out_dir}; give another --name or --overwrite")
-    cores = [int(c) for c in args.cores.split(",") if c.strip()] if args.cores else None
     command = "breast-seg " + " ".join(sys.argv[1:])
 
     setup = protocol.prepare_process(args.device, cfg.threads, cores, cfg.core_sampling_s)   # before numpy / torch
+    if setup["threads"] != cfg.threads:
+        print(f"threads lowered from {cfg.threads} to {setup['threads']} (= the pinned cores)", flush=True)
+        cfg = replace(cfg, threads=setup["threads"])
     from breast_seg.benchmark.pipelines import Device
 
     device = Device(setup["gpu"], cfg.threads)
@@ -558,8 +627,7 @@ def run_cli(args: Any) -> int:
         guard = protocol.GpuGuard.for_visible_device(torch_uuid, os.environ.get("CUDA_VISIBLE_DEVICES"),
                                                      cfg.allowed_pids, name=device.name)
     pipelines = build_pipelines(cfg, cfg_path.resolve().parent, paths, list(in_use), device, weights)
-    stored = {p: (load_stored(Path(f), cfg.craunet.fold if p == CRAUNET else None), Path(f).name)
-              for p, f in stored_files.items()}
+    stored = {p: (stored_series(stored_values[p]), Path(stored_files[p]).name) for p in stored_files}
     session = Session(cfg, pairs, configurations, pipelines, device, out_dir, name, setup, guard, stored, skipped,
                       command, overwrite=args.overwrite)
     try:
@@ -579,20 +647,40 @@ def run_cli(args: Any) -> int:
     return code
 
 
+def session_labels(paths: Sequence[Path]) -> List[str]:
+    """Unique labels of session files: the file stem, ``<folder>/<stem>`` when stems repeat, numbered if still not
+    unique."""
+    stems = [p.stem for p in paths]
+    labels = [p.stem if stems.count(p.stem) == 1 else f"{p.resolve().parent.name}/{p.stem}" for p in paths]
+    return [lab if labels.count(lab) == 1 else f"{i + 1}:{lab}" for i, lab in enumerate(labels)]
+
+
 def summary_cli(args: Any) -> int:
     """``breast-seg benchmark summary``: report of sessions, optionally composed from their undisturbed passes."""
     from breast_seg.benchmark import summary as S
 
+    paths = [Path(p) for p in args.sessions]
+    if len({p.resolve() for p in paths}) != len(paths):
+        raise ConfigError("a session is given twice")
+    out_dir = Path(args.out) if args.out else paths[0].resolve().parent
+    targets = [out_dir / f"{args.report}.md"]
+    if args.compose:
+        if args.compose in {p.stem for p in paths}:
+            raise ConfigError(f"--compose {args.compose}: the name of an input session")
+        targets += [out_dir / f"{args.compose}.json", out_dir / f"{args.compose}.csv"]
+    existing = [t.name for t in targets if t.exists()]
+    if existing and not args.overwrite:
+        raise ConfigError(f"{existing} exist in {out_dir}; give --overwrite to replace them")
     sessions = []
-    for p in args.sessions:
+    for label, p in zip(session_labels(paths), paths):
         try:
-            js, rows = S.load_session(Path(p))
+            js, rows = S.load_session(p)
         except ValueError as exc:
             raise ConfigError(str(exc)) from exc
         if "disturbed_passes" not in js:
-            js["disturbed_passes"] = S.disturbed_passes(S.measured(rows), Path(p).stem)
-        sessions.append((Path(p).stem, js, rows))
-    out_dir = Path(args.out) if args.out else Path(args.sessions[0]).resolve().parent
+            known = set(js.get("configurations", {}))
+            js["disturbed_passes"] = S.disturbed_passes(S.measured(rows[rows["configuration"].isin(known)]), label)
+        sessions.append((label, js, rows))
     out_dir.mkdir(parents=True, exist_ok=True)
     results = [(label, js) for label, js, _ in sessions]
     if args.compose:

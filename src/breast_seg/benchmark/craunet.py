@@ -14,7 +14,9 @@ weight files. The pipeline is then:
   pectoral points in the 512 space, D_CC = nipple x to the chest-wall edge, both scaled back with the padded size
   and the pixel spacing.
 
-Its two models cannot be batched (one per view). Needs scikit-image and SciPy (CRAUNet's own dependencies).
+Its two models cannot be batched (one per view). The padding side and the D_CC edge are the breast's side, as in
+the released code (which reads it from the series description). Needs scikit-image, SciPy and torchvision (CRAUNet's
+own dependencies).
 """
 from __future__ import annotations
 

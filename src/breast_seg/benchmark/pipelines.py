@@ -9,21 +9,38 @@ Stages of one pair (both views):
 ``post``   landmarks -> millimetres -> ``delta = |PNL - D_CC|`` -> decision (``delta <= 10 mm`` adequate)
 
 The four segmentation pipelines share the 640 canvas (:func:`breast_seg.imaging.preprocess.preprocess` without
-enhancement) and the measurement rule of the paper's evaluation: pectoral line by
-:func:`breast_seg.geometry.fit_pectoral_line`, nipple by :func:`breast_seg.evaluation.landmarks.nipple_point` with
-the nipple probability of the same forward pass (YOLO: its low-confidence nipple instance), PNL = distance to the
-infinite pectoral line, D_CC = distance to the chest-wall image edge of the breast's side.
+enhancement; chest-wall side as the app's DICOM reader resolves it) and the measurement rule of the paper's
+evaluation: pectoral line by :func:`breast_seg.geometry.fit_pectoral_line`, nipple by
+:func:`breast_seg.evaluation.landmarks.nipple_point` with the nipple probability of the same forward pass (YOLO: its
+low-confidence nipple instance), PNL = distance to the infinite pectoral line, D_CC = distance to the chest-wall
+edge of the CC image (the side of the pixel data, so a mirrored image with ``FieldOfViewHorizontalFlip=YES`` is
+measured from the correct edge).
 
 Where one model serves both views, the two views (and their flips) go through one batched forward pass;
-``Setting.batched = False`` runs every image (and every flip) on its own. Weights are loaded once; the nipple
-probability is copied from the device only when the arg-max has no nipple.
+``Setting.batched = False`` runs every image (and every flip) on its own. Weights are loaded once.
+
+Precision is that of the evaluation code the paper timed: on the GPU the training config's autocast (SegFormer and
+U-Net: ``optim.amp_dtype``, bfloat16), nnU-Net's float16 autocast, YOLO in float32; on the CPU everything in
+float32 (the trainers' own ``predict`` would autocast on the CPU too; ``cpu_autocast`` reproduces that).
+
+Where the nipple fallback is counted (only views whose arg-max map has no nipple pixel; the stage split follows the
+research script and is informational):
+
+* SegFormer-B3, U-Net: the nipple probability stays on the device after ``infer``; it is copied to the host, cast to
+  float16 and binarised inside ``post``.
+* nnU-Net: the probabilities are exported (``return_probabilities``) inside ``post``.
+* YOLO26m-seg: the second pass at :data:`YOLO_NIPPLE_FALLBACK_CONF` runs inside ``infer``.
+* CRAUNet regresses its points and has no fallback.
+
+A probability map that is zero everywhere after the float16 cast carries no nipple: the view has no measurement.
 """
 from __future__ import annotations
 
 import contextlib
+import itertools
 import os
 from pathlib import Path
-from typing import Any, Callable, Dict, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import numpy as np
 
@@ -31,7 +48,7 @@ from breast_seg.benchmark.protocol import Pair, Setting
 from breast_seg.evaluation.landmarks import chest_wall_mm, nipple_point, pnl_mm
 from breast_seg.evaluation.rule import THRESHOLD_MM
 from breast_seg.geometry import fit_pectoral_line
-from breast_seg.imaging.dicom import DEFAULT_PIXEL_SPACING_MM, _apply_voi_lut
+from breast_seg.imaging.dicom import DEFAULT_PIXEL_SPACING_MM, _apply_voi_lut, resolve_chest_side, resolve_laterality
 from breast_seg.imaging.preprocess import TARGET_SIZE, Transform, chest_wall_side, preprocess
 
 #: Confidence of the second YOLO pass that looks for a nipple instance when the label map has none.
@@ -51,23 +68,29 @@ def read_dicom_file(path: str) -> Tuple[np.ndarray, Any]:
     return _apply_voi_lut(ds.pixel_array, ds).astype(np.float32), ds
 
 
-def canvas_meta(pixels: np.ndarray, ds: Any) -> Dict[str, Any]:
-    """What :func:`preprocess` needs from the header: photometric, pixel spacing (mm) and chest-wall side."""
+def canvas_meta(pixels: np.ndarray, ds: Any, filename: str = "") -> Dict[str, Any]:
+    """What :func:`preprocess` needs, as :func:`breast_seg.imaging.read_dicom` builds it: photometric, pixel spacing
+    (mm) and the chest-wall side of the pixel data (:func:`breast_seg.imaging.dicom.resolve_chest_side`)."""
     spacing = getattr(ds, "ImagerPixelSpacing", None) or getattr(ds, "PixelSpacing", None)
+    side = chest_wall_side(ds)  # from ImageLaterality and the flip flag; the same answer resolve_chest_side gives
+    if side not in ("L", "R"):  # no tag: the reader's fallback (pixels after MONOCHROME1 inversion, then laterality)
+        side = resolve_chest_side(ds, pixels, resolve_laterality(ds, filename)[0] or "U")
     return {"photometric": str(getattr(ds, "PhotometricInterpretation", "MONOCHROME2")),
-            "pixel_spacing": float(spacing[0]) if spacing else DEFAULT_PIXEL_SPACING_MM,
-            "chest_side": chest_wall_side(ds, pixels)}
+            "pixel_spacing": float(spacing[0]) if spacing else DEFAULT_PIXEL_SPACING_MM, "chest_side": side}
 
 
-def canvas(pixels: np.ndarray, ds: Any) -> Tuple[np.ndarray, Transform]:
-    """The released 640 canvas of the segmentation models (no enhancement) and its transform."""
-    return preprocess(pixels, canvas_meta(pixels, ds), enhance=False)
+def canvas(pixels: np.ndarray, ds: Any, filename: str = "") -> Tuple[np.ndarray, Transform, Dict[str, Any]]:
+    """The released 640 canvas of the segmentation models (no enhancement), its transform and the header meta."""
+    meta = canvas_meta(pixels, ds, filename)
+    img, transform = preprocess(pixels, meta, enhance=False)
+    return img, transform, meta
 
 
-def measure_pair(label_mlo: np.ndarray, t_mlo: Transform, label_cc: np.ndarray, t_cc: Transform, side: str,
+def measure_pair(label_mlo: np.ndarray, t_mlo: Transform, label_cc: np.ndarray, t_cc: Transform, chest_side_cc: str,
                  fallback: NippleFallback) -> Tuple[float, float, Sources]:
-    """``(PNL mm, D_CC mm, (nipple source MLO, CC))``; NaN where a landmark is missing. ``fallback(i)`` is called
-    only for a view (0 = MLO, 1 = CC) whose label map has no nipple pixel."""
+    """``(PNL mm, D_CC mm, (nipple source MLO, CC))``; NaN where a landmark is missing. ``chest_side_cc`` is the
+    chest-wall side of the CC pixel data ('L' = left edge). ``fallback(i)`` is called only for a view (0 = MLO,
+    1 = CC) whose label map has no nipple pixel; it may return None (no fallback)."""
     pnl = dcc = float("nan")
     nip, src_mlo = nipple_point(label_mlo) if (label_mlo == 3).any() else nipple_point(label_mlo, fallback(0))
     line = fit_pectoral_line((label_mlo == 1).astype(np.uint8), (label_mlo == 2).astype(np.uint8), label_mlo.shape)
@@ -76,8 +99,13 @@ def measure_pair(label_mlo: np.ndarray, t_mlo: Transform, label_cc: np.ndarray, 
         pnl = pnl_mm(f(nip)[0], f(line.point_a)[0], f(line.point_b)[0], t_mlo.pixel_spacing)
     nc, src_cc = nipple_point(label_cc) if (label_cc == 3).any() else nipple_point(label_cc, fallback(1))
     if nc is not None:
-        dcc = chest_wall_mm(t_cc.to_original(nc)[0], side, t_cc.original_width, t_cc.pixel_spacing)
+        dcc = chest_wall_mm(t_cc.to_original(nc)[0], chest_side_cc, t_cc.original_width, t_cc.pixel_spacing)
     return pnl, dcc, (src_mlo, src_cc)
+
+
+def probability_or_none(q: np.ndarray) -> Optional[np.ndarray]:
+    """A float16 nipple-probability map, or None when it is zero everywhere (then it carries no nipple)."""
+    return q if q.any() else None
 
 
 def decide(delta: float) -> str:
@@ -199,17 +227,19 @@ class Pipeline:
 class CanvasPipeline(Pipeline):
     """A segmentation model on the shared 640 canvas, measured by :func:`measure_pair`."""
 
-    def __init__(self, name: str, trainer: Any, weights: Path, device: Device, flops: bool = True):
+    def __init__(self, name: str, trainer: Any, weights: Path, device: Device, flops: bool = True,
+                 cpu_autocast: bool = False):
         self.name, self.trainer, self.weights, self.device, self.flops = name, trainer, Path(weights), device, flops
+        self.cpu_autocast = cpu_autocast
 
     def model_input(self, im: np.ndarray, ic: np.ndarray) -> Any:
         raise NotImplementedError
 
     def prepare(self, raw, pair):
         (pm, dm), (pc, dc) = raw
-        im, tm = canvas(pm, dm)
-        ic, tc = canvas(pc, dc)
-        return self.model_input(im, ic), tm, tc
+        im, tm, _ = canvas(pm, dm, pair.mlo)
+        ic, tc, meta_cc = canvas(pc, dc, pair.cc)
+        return self.model_input(im, ic), tm, tc, meta_cc["chest_side"]
 
     def infer(self, prepared, setting):
         return self.run_model(prepared[0], setting)
@@ -220,20 +250,22 @@ class CanvasPipeline(Pipeline):
 
     def measure(self, output, prepared, pair):
         lab_mlo, lab_cc, fallback = output
-        return measure_pair(lab_mlo, prepared[1], lab_cc, prepared[2], pair.side, fallback)
+        chest = prepared[3] if prepared[3] in ("L", "R") else pair.side
+        return measure_pair(lab_mlo, prepared[1], lab_cc, prepared[2], chest, fallback)
 
     def autocast(self):
-        """bf16 / fp16 autocast of the training config on the GPU (``optim.amp_dtype``), float32 on the CPU."""
+        """The training config's autocast (``optim.amp_dtype``) on the GPU; float32 on the CPU unless
+        ``cpu_autocast`` (then the config's dtype there too, as the trainers' ``predict`` does)."""
         import torch
 
         dt = self.trainer.config.optim.amp_dtype
-        if self.device.gpu and dt != "none":
-            return torch.autocast("cuda", dtype=getattr(torch, dt))
+        if dt != "none" and (self.device.gpu or self.cpu_autocast):
+            return torch.autocast("cuda" if self.device.gpu else "cpu", dtype=getattr(torch, dt))
         return torch.autocast("cpu", enabled=False)
 
     def precision(self) -> str:
         dt = self.trainer.config.optim.amp_dtype
-        return f"{dt} autocast" if self.device.gpu and dt != "none" else "float32"
+        return f"{dt} autocast" if dt != "none" and (self.device.gpu or self.cpu_autocast) else "float32"
 
 
 # ── SegFormer-B3 and U-Net (breast_seg.training.semantic) ─────────────────────────────────────────────────────
@@ -284,9 +316,9 @@ class SegFormerPipeline(CanvasPipeline):
                 lab = p.argmax(1).to(torch.uint8).cpu().numpy()
         tta = setting.tta
 
-        def nipple_probability(i: int) -> np.ndarray:
+        def nipple_probability(i: int) -> Optional[np.ndarray]:
             q = p[i, 3] if tta else p[i].softmax(0)[3]
-            return q.float().cpu().numpy().astype(np.float16)
+            return probability_or_none(q.float().cpu().numpy().astype(np.float16))
 
         return lab[0], lab[1], nipple_probability
 
@@ -332,16 +364,17 @@ class UNetPipeline(CanvasPipeline):
                         ps.append(o)
                     p = torch.cat(ps)
                 lab = p.argmax(1).to(torch.uint8).cpu().numpy()
-        return lab[0], lab[1], lambda i: p[i, 3].float().cpu().numpy().astype(np.float16)
+        return lab[0], lab[1], lambda i: probability_or_none(p[i, 3].float().cpu().numpy().astype(np.float16))
 
 
 # ── nnU-Net ResEnc-M (breast_seg.training.nnunet) ─────────────────────────────────────────────────────────────
 
 class NnUNetPipeline(CanvasPipeline):
     """nnU-Net as ``nnUNetv2_predict`` runs it on one 640 canvas: its own preprocessing (crop to non-zero, z-score),
-    a single sliding window, mirroring on the axes stored in the checkpoint, its autocast (float16) on the GPU, its
-    half-precision Gaussian accumulation and its export function. ``weights`` is the trained model folder
-    (``<trainer>__<plans>__<configuration>``)."""
+    a single sliding window, mirroring as ``nnUNetPredictor`` does it (the average over the image and every
+    non-empty combination of the mirroring axes stored in the checkpoint; the shipped checkpoint mirrors the
+    horizontal axis only), its autocast (float16) on the GPU, its half-precision Gaussian accumulation and its export
+    function. ``weights`` is the trained model folder (``<trainer>__<plans>__<configuration>``)."""
 
     family = "nnunet"
     flip_option = True
@@ -368,13 +401,15 @@ class NnUNetPipeline(CanvasPipeline):
             raise
         if len(pr.list_of_parameters) != 1:
             raise RuntimeError("expected the weights of exactly one fold")
-        self.net = pr.network.to(self.device.torch).eval()
+        net = pr.network
+        getattr(net, "_orig_mod", net).load_state_dict(pr.list_of_parameters[0])  # the fold's weights, explicitly
+        self.net = net.to(self.device.torch).eval()
         self.pm, self.cm, self.dj, self.lm = pr.plans_manager, pr.configuration_manager, pr.dataset_json, pr.label_manager
         self.pre = self.cm.preprocessor_class(verbose=False)
         if tuple(self.cm.patch_size) != (TARGET_SIZE, TARGET_SIZE):
             raise RuntimeError(f"patch size {tuple(self.cm.patch_size)}: the benchmark expects one 640 x 640 window")
-        self.axes = tuple(m + 2 for m in pr.allowed_mirroring_axes)
-        self.mirroring_axes = tuple(pr.allowed_mirroring_axes)
+        self.mirroring_axes = tuple(pr.allowed_mirroring_axes or ())
+        self.combos = mirror_combinations(self.mirroring_axes)
         self.gauss = compute_gaussian(tuple(self.cm.patch_size), sigma_scale=1. / 8, value_scaling_factor=10,
                                       device=self.device.torch)
         self._pad, self._export = pad_nd_image, convert_predicted_logits_to_segmentation_with_correct_shape
@@ -383,7 +418,13 @@ class NnUNetPipeline(CanvasPipeline):
                 "weights_file_note": "nnU-Net checkpoint: network weights plus optimiser state",
                 "gflops_per_forward": count_gflops(lambda: self.net(z), self.flops), "models_per_pair": 1,
                 "input": "640 x 640 patch, 1 channel, z-score", "mirroring_axes": list(self.mirroring_axes),
+                "mirroring_combinations": [list(c) for c in self.combos],
                 "precision": "float16 autocast (nnU-Net)" if self.device.gpu else "float32"}
+
+    def setting_info(self, setting):
+        n = 1 + len(self.combos) if setting.tta else 1
+        return {"tta": setting.tta, "batched": setting.batched, "forwards_per_pair": 2 * n,
+                "forward_calls_per_pair": 1 if setting.batched else 2 * n}
 
     def model_input(self, im, ic):
         import torch
@@ -401,24 +442,27 @@ class NnUNetPipeline(CanvasPipeline):
     def run_model(self, g, setting):
         import torch
 
-        net, axes = self.net, self.axes
+        net, combos = self.net, (self.combos if setting.tta else [])
         with torch.inference_mode():
             with (torch.autocast("cuda", enabled=True) if self.device.gpu else contextlib.nullcontext()):
                 x = torch.stack([g[0][0][:, 0], g[1][0][:, 0]]).to(self.device.torch)  # (2, 1, 640, 640)
                 if setting.batched:
-                    if setting.tta:
-                        o = net(torch.cat([x, torch.flip(x, axes)]))
-                        pred = o[:2] + torch.flip(o[2:], axes)
-                        pred /= 2
+                    if combos:  # image and every mirrored copy in one forward
+                        o = net(torch.cat([x] + [torch.flip(x, c) for c in combos]))
+                        pred = o[:2] + torch.flip(o[2:4], combos[0])
+                        for k, c in enumerate(combos[1:], start=2):
+                            pred += torch.flip(o[2 * k:2 * k + 2], c)
+                        pred /= (len(combos) + 1)
                     else:
                         pred = net(x)
                 else:
                     ps = []
                     for i in range(2):
                         q = net(x[i:i + 1])
-                        if setting.tta:
-                            q += torch.flip(net(torch.flip(x[i:i + 1], axes)), axes)
-                            q /= 2
+                        if combos:
+                            for c in combos:
+                                q += torch.flip(net(torch.flip(x[i:i + 1], c)), c)
+                            q /= (len(combos) + 1)
                         ps.append(q)
                     pred = torch.cat(ps)
                 # nnUNetPredictor's accumulation of the single window: Gaussian weighting in half precision
@@ -435,11 +479,11 @@ class NnUNetPipeline(CanvasPipeline):
             lab = [np.asarray(self._export(parts[i], self.pm, self.cm, self.lm, g[i][2], return_probabilities=False,
                                            num_threads_torch=self.device.threads)[0], np.uint8) for i in range(2)]
 
-        def nipple_probability(i: int) -> np.ndarray:
+        def nipple_probability(i: int) -> Optional[np.ndarray]:
             with torch.inference_mode():
                 pr = self._export(parts[i], self.pm, self.cm, self.lm, g[i][2], return_probabilities=True,
                                   num_threads_torch=self.device.threads)[1]
-            return pr.reshape(pr.shape[0], *pr.shape[-2:])[3].astype(np.float16)
+            return probability_or_none(pr.reshape(pr.shape[0], *pr.shape[-2:])[3].astype(np.float16))
 
         return lab[0], lab[1], nipple_probability
 
@@ -533,6 +577,12 @@ class YoloPipeline(CanvasPipeline):
         lab = [self._flatten(res[0], False), self._flatten(res[1], True)]
         fallback: Dict[int, np.ndarray] = {i: self._nipple_instance(g[i]) for i in range(2) if not (lab[i] == 3).any()}
         return lab[0], lab[1], lambda i: fallback[i]
+
+
+def mirror_combinations(axes: Tuple[int, ...]) -> List[Tuple[int, ...]]:
+    """Tensor dims to flip, as ``nnUNetPredictor`` mirrors: every non-empty combination of the spatial ``axes``."""
+    dims = [a + 2 for a in axes]
+    return [c for i in range(len(dims)) for c in itertools.combinations(dims, i + 1)]
 
 
 FAMILIES = {"segformer": SegFormerPipeline, "unet": UNetPipeline, "nnunet": NnUNetPipeline, "yolo_seg": YoloPipeline}

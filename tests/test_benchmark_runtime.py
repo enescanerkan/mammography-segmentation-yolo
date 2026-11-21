@@ -17,7 +17,17 @@ import pytest
 
 from breast_seg.benchmark import protocol
 from breast_seg.benchmark import summary as S
-from breast_seg.benchmark.pipelines import CanvasPipeline, Pipeline, canvas, decide, measure_pair, read_dicom_file
+from breast_seg.benchmark.pipelines import (
+    CanvasPipeline,
+    Pipeline,
+    canvas,
+    canvas_meta,
+    decide,
+    measure_pair,
+    mirror_combinations,
+    probability_or_none,
+    read_dicom_file,
+)
 from breast_seg.benchmark.protocol import GpuGuard, InvalidMeasurement, Pair, Setting
 from breast_seg.benchmark.runtime import (
     TABLE11,
@@ -26,7 +36,9 @@ from breast_seg.benchmark.runtime import (
     families,
     load_runtime_config,
     read_pairs,
+    read_stored,
     resolve_configurations,
+    session_labels,
 )
 from breast_seg.cli import main
 from breast_seg.config import ConfigError, PathsConfig
@@ -87,8 +99,9 @@ def _painted(img: np.ndarray, mlo: bool, nipple: bool = True) -> np.ndarray:
 def test_measure_pair_on_a_phantom_canvas(tmp_path):
     pm, dm = read_dicom_file(_write_dicom(tmp_path / "m.dcm", "MLO", "L"))
     pc, dc = read_dicom_file(_write_dicom(tmp_path / "c.dcm", "CC", "L"))
-    im, tm = canvas(pm, dm)
-    ic, tc = canvas(pc, dc)
+    im, tm, _ = canvas(pm, dm)
+    ic, tc, meta_cc = canvas(pc, dc)
+    assert meta_cc["chest_side"] == "L"
     calls: List[int] = []
 
     def fallback(i):
@@ -103,6 +116,46 @@ def test_measure_pair_on_a_phantom_canvas(tmp_path):
     x_orig = (400 - tc.pad_left) / tc.scale + tc.crop_x1
     assert dcc == pytest.approx(x_orig * 0.1)
     assert decide(abs(pnl - dcc)) in ("adequate", "inadequate") and decide(float("nan")) == "no measurement"
+    # D_CC is measured to the chest-wall edge of the pixel data: 'R' = the right edge
+    _, dcc_r, _ = measure_pair(_painted(im, True), tm, _painted(ic, False, nipple=False), tc, "R", fallback)
+    assert dcc_r == pytest.approx((tc.original_width - x_orig) * 0.1)
+    # a fallback map that is zero everywhere carries no nipple: no measurement
+    _, dcc_none, src = measure_pair(_painted(im, True), tm, _painted(ic, False, nipple=False), tc, "L",
+                                    lambda i: probability_or_none(np.zeros((640, 640), np.float16)))
+    assert np.isnan(dcc_none) and src[1] == "none"
+    assert probability_or_none(np.full((4, 4), 1e-3, np.float16)) is not None
+
+
+def test_canvas_chest_side_follows_the_dicom_reader(tmp_path):
+    from breast_seg.imaging import read_dicom
+
+    cases = [("L", dict(flipped=True)),                                      # mirrored pixels: chest wall on the right
+             ("R", dict(photometric="MONOCHROME1", include_laterality=False)),   # pixel fallback after inversion
+             ("L", {})]
+    sides = []
+    for i, (side, kw) in enumerate(cases):
+        path = _write_dicom(tmp_path / f"{i}_{side}-CC.dcm", "CC", side, **kw)   # the name carries the side
+        px, ds = read_dicom_file(path)
+        _, meta = read_dicom(path.read_bytes(), path.name)
+        sides.append(canvas_meta(px, ds, path.name)["chest_side"])
+        assert sides[-1] == meta["chest_side"]
+    assert sides == ["R", "R", "L"]
+
+
+def test_nnunet_mirroring_combinations():
+    assert mirror_combinations((1,)) == [(3,)]                      # the released checkpoint: horizontal only
+    assert mirror_combinations((0, 1)) == [(2,), (3,), (2, 3)]
+    assert mirror_combinations(()) == []
+    from breast_seg.benchmark.pipelines import NnUNetPipeline
+
+    pipe = NnUNetPipeline.__new__(NnUNetPipeline)
+    pipe.combos = mirror_combinations((0, 1))
+    assert pipe.setting_info(Setting(True, True)) == {"tta": True, "batched": True, "forwards_per_pair": 8,
+                                                      "forward_calls_per_pair": 1}
+    assert pipe.setting_info(Setting(True, False))["forward_calls_per_pair"] == 8
+    pipe.combos = mirror_combinations((1,))
+    assert pipe.setting_info(Setting(True, True))["forwards_per_pair"] == 4
+    assert pipe.setting_info(Setting(False, False))["forwards_per_pair"] == 2
 
 
 # ── protocol ──────────────────────────────────────────────────────────────────────────────────────────────────
@@ -140,6 +193,15 @@ def test_jobs_and_rotating_order_match_the_research_protocol():
     assert protocol.rotated(base, 1) == base[1:] + base[:1]
 
 
+def test_threads_follow_the_pinned_cores():
+    pick = lambda n, s: (list(range(min(n, 3))), {})  # noqa: E731  (a machine with 3 free physical cores)
+    assert protocol.choose_cores(8, [4, 2, 2, 9], 0.0, pick, can_pin=True)[::2] == ([2, 4, 9], 3)
+    chosen, info, threads = protocol.choose_cores(8, None, 0.0, pick, can_pin=True)
+    assert threads == 3 == len(chosen) and info["threads_requested"] == 8 and info["threads_lowered_to"] == 3
+    assert protocol.choose_cores(2, None, 0.0, pick, can_pin=True)[2] == 2
+    assert protocol.choose_cores(8, None, 0.0, pick, can_pin=False)[::2] == ([], 8)
+
+
 def test_parse_device_and_mapping_args():
     assert protocol.parse_device("cpu") == (False, None)
     assert protocol.parse_device("cuda") == (True, None)
@@ -173,7 +235,10 @@ def test_gpu_guard_identifies_the_card_and_finds_foreign_processes():
     g = GpuGuard.for_visible_device(None, "1", allowed_pids=[11], smi=smi, own_pid=7)
     assert g.uuid == "GPU-bbb" and g.info["uuid_from"] == "CUDA_VISIBLE_DEVICES"
     assert [p["pid"] for p in g.foreign()] == [12]          # not itself (7), not the allowed 11, not the other card
-    assert GpuGuard.for_visible_device("GPU-aaa", "1", smi=smi).info["uuid_from"] == "torch"
+    assert GpuGuard.for_visible_device("GPU-bbb", "1", smi=smi).info["uuid_from"] == "torch"
+    with pytest.raises(RuntimeError, match="CUDA_DEVICE_ORDER"):   # index 1 is another card for CUDA than for nvidia-smi
+        GpuGuard.for_visible_device("GPU-aaa", "1", smi=smi)
+    assert GpuGuard.for_visible_device("GPU-aaa", None, smi=smi).uuid == "GPU-aaa"
     with pytest.raises(InvalidMeasurement, match="at start"):
         g.check_start(sleep=lambda s: None)
     with pytest.raises(RuntimeError):
@@ -232,13 +297,14 @@ def test_disturbed_pass_rule():
     assert S.disturbed_passes(S.measured(t2).iloc[:0]) == []
 
 
-def _session_json(kind: str = "cpu", start: str = "2026-01-01 00:00:00") -> dict:
+def _session_json(kind: str = "cpu", start: str = "2026-01-01 00:00:00", configurations=("a", "b")) -> dict:
     conf = {"pipeline": "p", "family": "unet", "flip_option": True, "tta": True, "batched": True,
-            "check": {"decision_flips": 0, "measurement_only_on_one_side": 0}}
+            "model_load_s": 3.0, "check": {"decision_flips": 0, "measurement_only_on_one_side": 0}}
     return {"valid": True, "session": {"kind": kind, "threads": 4, "batched": True, "preprocessing": "released",
                                        "start": {"time": start}, "end": {"time": start}, "pinned_cpus": [0],
-                                       "device": kind},
-            "configurations": {"a": dict(conf), "b": dict(conf)}, "decisions_differ_from_stored": {}}
+                                       "device": kind, "warmup_pairs": 1, "n_pairs": 40},
+            "configurations": {c: dict(conf) for c in configurations}, "decisions_differ_from_stored": {},
+            "comparisons": {"stale": {"speedup_total": 9.9}}}
 
 
 def test_compose_keeps_the_undisturbed_passes_in_time_order():
@@ -254,10 +320,24 @@ def test_compose_keeps_the_undisturbed_passes_in_time_order():
     assert a["pairs_per_min"] == pytest.approx(60 * 80 / (40 * 1.0 + 40 * 1.2))
     assert js["session"]["composed"]["outputs_checked_in"] == "second"   # first session's pass 1 was disturbed
     assert js["session"]["passes"] == 2 and js["session"]["start"]["time"] == "2026-01-01 00:00:00"
-    other = _session_json()
-    other["session"]["threads"] = 8
-    with pytest.raises(ValueError, match="threads"):
-        S.compose([("first", _session_json(), one), ("x", other, two)])
+    assert "model_load_s" not in a and a["pass_max_abs_delta_diff_mm"] == 0.0 and js["comparisons"] == {}
+    for key, value in (("threads", 8), ("device", "other CPU"), ("warmup_pairs", 5), ("n_pairs", 39)):
+        other = _session_json()
+        other["session"][key] = value
+        with pytest.raises(ValueError, match=key):
+            S.compose([("first", _session_json(), one), ("x", other, two)])
+    with pytest.raises(ValueError, match="different pairs"):
+        S.compose([("first", _session_json(), one), ("x", _session_json(), two.assign(study="other"))])
+
+
+def test_compose_ignores_rows_of_a_configuration_dropped_mid_session():
+    one = _rows({("a", 1): [1.0] * 40, ("a", 2): [1.0] * 40, ("b", 1): [2.0] * 40, ("b", 2): [2.0] * 40,
+                 ("gone", 1): [9.0] * 3})                        # dropped after three rows: not in the JSON
+    two = _rows({("a", 1): [1.0] * 40, ("a", 2): [1.0] * 40, ("b", 1): [2.0] * 40, ("b", 2): [2.0] * 40})
+    js, rows = S.compose([("one", _session_json(), one), ("two", _session_json(), two)])
+    assert "gone" not in set(rows["configuration"]) and sorted(js["configurations"]) == ["a", "b"]
+    assert js["session"]["composed"]["rows_ignored"] == {"one": {"gone": 3}}
+    assert [p["n_measurements"] for p in js["disturbed_passes"]] == [80, 80, 80, 80]
 
 
 def test_accuracy_and_stored_check():
@@ -272,6 +352,23 @@ def test_accuracy_and_stored_check():
     assert ch["n_compared"] == 2 and ch["decision_flips"] == 1 and ch["max_abs_delta_diff_mm"] == pytest.approx(3.0)
     with pytest.raises(ValueError, match="more than one"):
         S.stored_check(delta, pd.Series([1.0, 2.0], index=pd.MultiIndex.from_tuples([("s", "L")] * 2)), "x.csv", 0)
+    t = pd.DataFrame({"pass": [1, 1], "pair": [0, 1], "study": ["s", "s"], "side": ["L", "R"], "delta_mm": [5.0, 12.0],
+                      "decision": ["adequate", "inadequate"], "nipple_source_mlo": "argmax", "nipple_source_cc": "argmax"})
+    bad = pd.Series([1.0, 2.0], index=pd.MultiIndex.from_tuples([("s", "L")] * 2, names=["study", "side"]))
+    out = S.output_summary(t, "unet", None, (bad, "bad.csv"))
+    assert out["check"]["failed"] and "more than one" in out["check"]["error"] and out["accuracy_stored"] is None
+    assert S.session_flags({"x": {"check": out["check"]}})["stored_checks_failed"] == ["x"]
+
+
+def test_read_stored_validates_at_the_start(tmp_path):
+    f = tmp_path / "stored.csv"
+    f.write_text("fold,StudyInstanceUID,side,delta\n0,s,l,4.5\n1,s,L,9.0\n0,t,R,\n")
+    assert read_stored(f, fold=0) == {("s", "L"): 4.5, ("t", "R"): pytest.approx(float("nan"), nan_ok=True)}
+    with pytest.raises(ConfigError, match="duplicate"):
+        read_stored(f)                                            # without the fold filter s/L appears twice
+    f.write_text("study,side,value\ns,L,1\n")
+    with pytest.raises(ConfigError, match="needs study"):
+        read_stored(f)
 
 
 # ── a whole session with fakes ────────────────────────────────────────────────────────────────────────────────
@@ -288,12 +385,14 @@ class FakeDevice:
 
 
 class TablePipeline(Pipeline):
-    """Reads the real DICOMs, returns fixed PNL / D_CC per pair."""
+    """Reads the real DICOMs, returns fixed PNL / D_CC per pair; ``fail_after`` calls of ``infer`` it raises."""
 
     family, flip_option = "unet", True
 
-    def __init__(self, name: str, values: Dict[int, Tuple[float, float]], fail_load: bool = False):
+    def __init__(self, name: str, values: Dict[int, Tuple[float, float]], fail_load: bool = False,
+                 fail_after: int = 0):
         self.name, self.values, self.fail_load, self.calls = name, values, fail_load, 0
+        self.fail_after = fail_after
 
     def load(self):
         if self.fail_load:
@@ -305,6 +404,8 @@ class TablePipeline(Pipeline):
 
     def infer(self, prepared, setting):
         self.calls += 1
+        if self.fail_after and self.calls > self.fail_after:
+            raise RuntimeError("broke mid-session")
         return setting.tta
 
     def measure(self, output, prepared, pair):
@@ -394,6 +495,38 @@ class FakeGuard:
 
     def finish(self):
         return []
+
+
+def test_session_drops_a_configuration_that_breaks_mid_session(tmp_path):
+    pairs = _pairs(tmp_path)
+    good = TablePipeline("m", {i: (50.0, 45.0) for i in range(3)})
+    bad = TablePipeline("z", {i: (50.0, 45.0) for i in range(3)}, fail_after=3)   # 3 rows, then 3 failures in a row
+    s = _session(tmp_path, pairs, {"m": good, "z": bad}, {"m_tta": ("m", Setting(True, True)),
+                                                          "z_tta": ("z", Setting(True, True))})
+    summary, code = s.run()
+    assert code == 3 and list(summary["errors"]) == ["z_tta"] and list(summary["configurations"]) == ["m_tta"]
+    assert summary["rows_ignored"] == {"z_tta": 3}
+    assert sum(p["n_measurements"] for p in summary["disturbed_passes"]) == 6      # only m_tta's measured rows
+    rows = pd.read_csv(tmp_path / "out" / "run.csv")
+    js = json.loads((tmp_path / "out" / "run.json").read_text())
+    composed, _ = S.compose([("run", js, rows), ("again", js, rows)])                   # no KeyError
+    assert composed["session"]["composed"]["rows_ignored"] == {"run": {"z_tta": 3}, "again": {"z_tta": 3}}
+
+
+def test_session_records_a_failed_stored_check_and_replaces_old_outputs(tmp_path):
+    pairs = _pairs(tmp_path)
+    pipe = TablePipeline("m", {i: (50.0, 45.0) for i in range(3)})
+    bad = pd.Series([1.0, 2.0], index=pd.MultiIndex.from_tuples([("study0", "L")] * 2, names=["study", "side"]))
+    out = tmp_path / "out"
+    out.mkdir()
+    (out / "run.json").write_text("{}")
+    (out / "run.csv").write_text("old")
+    s = _session(tmp_path, pairs, {"m": pipe}, {"m_tta": ("m", Setting(True, True))}, stored={"m": (bad, "bad.csv")},
+                 overwrite=True)
+    summary, code = s.run()
+    assert code == 0 and summary["stored_checks_failed"] == ["m_tta"]
+    assert json.loads((out / "run.json").read_text())["configurations"]["m_tta"]["check"]["failed"] is True
+    assert (out / "run.csv").read_text() != "old"
 
 
 def test_session_aborts_when_a_foreign_process_appears(tmp_path):
@@ -486,7 +619,23 @@ def test_cli_help_and_summary_report(tmp_path, capsys):
     assert "## one" in report and "## both" in report and "Table 11 layout" in report
     assert json.loads((out / "both.json").read_text())["session"]["composed"]["sources"] == ["one", "two"]
     assert main(["benchmark", "summary", str(tmp_path / "nothing.json")]) == 2
+    # no overwriting without --overwrite, never an input's name
+    assert main(["benchmark", "summary", str(out / "one.json"), str(out / "two.json"), "--compose", "both"]) == 2
+    assert main(["benchmark", "summary", str(out / "one.json"), str(out / "two.json"), "--compose", "both",
+                 "--overwrite"]) == 0
+    assert main(["benchmark", "summary", str(out / "one.json"), str(out / "two.json"), "--compose", "one",
+                 "--overwrite"]) == 2
+    assert json.loads((out / "one.json").read_text())["session"].get("composed") is None
+    # cores and threads must agree (checked before anything is pinned)
+    assert main(["benchmark", "runtime", str(TABLE11_YAML), "--pairs", str(out / "x.csv"), "--device", "cpu",
+                 "--cores", "0,1", "--threads", "3"]) == 2
     capsys.readouterr()
+
+
+def test_session_labels_are_unique():
+    labels = session_labels([Path("a/run_cpu.json"), Path("b/run_cpu.json"), Path("b/other.json")])
+    assert labels == ["a/run_cpu", "b/run_cpu", "other"]
+    assert session_labels([Path("a/x.json"), Path("a/x.json")]) == ["1:a/x", "2:a/x"]
 
 
 def test_craunet_released_preprocessing_geometry(tmp_path):
